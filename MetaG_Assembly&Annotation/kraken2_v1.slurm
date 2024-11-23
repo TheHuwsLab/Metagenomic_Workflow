@@ -18,7 +18,7 @@ module load apps/anaconda3/2024.06/bin
 conda activate /&&/conda-envs/kraken2_2.1.3
 
 # Set location of Kraken2 database to use:
-DBNAME=/&&/conda-dbs/kraken2/2_pluspfp_20230605
+DBNAME=/&&/conda-dbs/kraken2/k2_pluspfp_20240904
 
 cd /mnt/scratch2/users/$$/$$
 
