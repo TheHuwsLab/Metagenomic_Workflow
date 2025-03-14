@@ -27,7 +27,7 @@ fi
 cd "$WORK_DIR" || exit
 
 # Specify data dir tag - First chars present in 'all' data sample dirs to be processed
-DIR_TAG="AT"
+DIR_TAG="PN"
 
 # Loop through each sample directory
 for dir in "${DIR_TAG}"*; do
