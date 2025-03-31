@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 
 #SBATCH --job-name=Prepare_HUMAnN_Jobs
 #SBATCH --error=/users/3057556/jobs/Prepare_HUMAnN_Jobs_$$.error

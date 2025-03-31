@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=20
 #SBATCH --mem=40G
 #SBATCH --job-name=fastp_test
 #SBATCH --error=/users/3057556/jobs/fastp_test.error
@@ -34,10 +34,10 @@ for subdir in "$INPUT_DIR"/*/; do
 
         if [[ -f "$R1" && -f "$R2" ]]; then
             # Define output filenames in the same directory
-            out_R1="${R1/.fastq.gz/_trimmed.fastq.gz}"
-            out_R2="${R2/.fastq.gz/_trimmed.fastq.gz}"
-            out_unpaired_R1="${R1/.fastq.gz/_unpaired.fastq.gz}"
-            out_unpaired_R2="${R2/.fastq.gz/_unpaired.fastq.gz}"
+            out_R1="${R1/.fastq.gz/_trimmed_paired.fastq.gz}"
+            out_R2="${R2/.fastq.gz/_trimmed_paired.fastq.gz}"
+            out_unpaired_R1="${R1/.fastq.gz/_trimmed_unpaired.fastq.gz}"
+            out_unpaired_R2="${R2/.fastq.gz/_trimmed_unpaired.fastq.gz}"
             report_html="${subdir}fastp_report.html"
 
             echo "Read files to be trimmed: \"$R1\" & \"$R2\""
@@ -46,7 +46,7 @@ for subdir in "$INPUT_DIR"/*/; do
             fastp -i "$R1" -I "$R2" -o "$out_R1" -O "$out_R2" \
                   --unpaired1 "$out_unpaired_R1" --unpaired2 "$out_unpaired_R2" \
                   --html "$report_html"  --detect_adapter_for_pe \
-                  --thread 8 --qualified_quality_phred 20 --length_required 50
+                  --thread 20 --qualified_quality_phred 20 --length_required 50
 
             echo "Finished processing: $(basename "$subdir")"
         else

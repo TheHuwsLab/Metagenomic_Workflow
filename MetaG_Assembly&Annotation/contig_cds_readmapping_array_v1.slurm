@@ -34,9 +34,9 @@ for dir in ./*; do
                 outdir="${sample_name}_readmapped"
                 contigs="${sample_name}_unmapped_metaspades/contigs.fasta"
                 bowtie_db="${sample_name}_readmapped/${sample_name}_bowtie2_db"
-                readmap_output_bam_sorted="${sample_name}_readmapped/${sample_name}_readmapped_sorted_new.bam"
-                readmap_contig_summary="${sample_name}_readmapped/${sample_name}_readmapped_contig_summary_new.txt"
-                readmap_cds_summary="${sample_name}_readmapped/${sample_name}_readmapped_cds_summary_new.txt"
+                readmap_output_bam_sorted="${sample_name}_readmapped/${sample_name}_readmapped_sorted.bam"
+                readmap_contig_summary="${sample_name}_readmapped/${sample_name}_readmapped_contig_summary.txt"
+                readmap_cds_summary="${sample_name}_readmapped/${sample_name}_readmapped_cds_summary.txt"
 
                 # Define the job script name
                 job_script="$JOB_DIR/${sample_name}_readmap_job.sh"
