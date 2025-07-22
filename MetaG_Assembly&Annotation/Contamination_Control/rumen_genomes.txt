@@ -1,0 +1,7 @@
+GCF_000001405.40_GRCh38.p14_genomic.fna.gz
+GCF_002263795.2_ARS-UCD1.3_genomic.fna.gz
+GCF_016772045.1_ARS-UI_Ramb_v2.0_genomic.fna.gz
+Lolium_perenne.MPB_Lper_Kyuss_1697.dna.toplevel.fa.gz
+Ovis_aries.Oar_v3.1.dna_rm.toplevel.fa.gz
+Triticum_aestivum.IWGSC.dna_rm.toplevel.fa.gz
+Zea_mays.Zm-B73-REFERENCE-NAM-5.0.dna.toplevel.fa.gz

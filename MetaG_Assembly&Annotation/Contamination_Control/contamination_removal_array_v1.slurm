@@ -21,11 +21,12 @@ mkdir -p "$JOB_DIR"
 # Change to the working directory
 cd "$WORK_DIR" || exit
 
+# Define the directory tag for sample directories
 DIR_TAG="PN"
 
 for dir in ./"$DIR_TAG"*; do
   if [[ -d "$dir" ]]; then
-    for file in "$dir"/*R1_001.fastq.gz; do
+    for file in "$dir"/*R1_001.fastq.gz; do # Change this pattern if your files have a different naming convention
       filename=$(basename "$file")
       sample_name_1="${filename}"
       sample_name_2=$(echo "$sample_name_1" | sed 's/R1/R2/g')
@@ -47,6 +48,8 @@ for dir in ./"$DIR_TAG"*; do
 
       # Write the SLURM job script
       cat <<EOL > "$job_script"
+
+
 #!/bin/bash
 
 #SBATCH --cpus-per-task=30
@@ -60,15 +63,14 @@ for dir in ./"$DIR_TAG"*; do
 #SBATCH --mail-user=n.dimonaco@qub.ac.uk
 #SBATCH --mail-type=BEGIN,END,FAIL
 
+# Load required modules and activate conda environment
 module load apps/anaconda3/2024.06/bin
-
-source activate /mnt/scratch2/igfs-anaconda/conda-envs/bowtie2_2.5.1
-
+source activate /mnt/$$/conda-envs/bowtie2_2.5.1
 
 
 # Run bowtie2 and pipe the output directly into samtools without writing intermediate files
-bowtie2 --threads 30 --very-sensitive-local \
-    -x /mnt/scratch2/igfs-databases/reference_genomes/combined_cow_sheep_human/Human_Sheep_Cow_Combined_Bowtie2/Human_Sheep_Cow_Combined \
+bowtie2 --threads 30  \
+    -x /mnt/$$/reference_genomes/rumen_contamination_genomes/rumen_contamination_bt2_db \
     -1 "$dir/$sample_name_1" -2 "$dir/$sample_name_2" | \
 samtools view -b -f 12 - | \
 samtools sort -n - -o "$dir/$unmapped_sorted_bam"
