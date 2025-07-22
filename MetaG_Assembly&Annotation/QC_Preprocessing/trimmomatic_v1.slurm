@@ -3,17 +3,17 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=20G
 #SBATCH --job-name=trimm
-#SBATCH --error=Trim_$$.error
-#SBATCH --output=Trim_$$.txt
+#SBATCH --error=/users/&&/jobs/trimm_&&.error
+#SBATCH --output=/users/&&/jobs/trimm_&&.txt
 #SBATCH --partition=&&
 #SBATCH --nodes=1
 #SBATCH --time=24:00:00
 #SBATCH --mail-user=$$@qub.ac.uk
 #SBATCH --mail-type=BEGIN,END,FAIL
 
+# Activate the conda environment with Trimmomatic installed
 module load apps/anaconda3/2024.06/bin
-
-conda activate /&&/conda-envs/trimmomatic_0.39/
+source activate /&&/conda-envs/trimmomatic_0.39/
 
 
 # Change the working directory to where your samples are
@@ -32,7 +32,7 @@ for dir in ./*; do
         "$dir/$sample_name_1" "$dir/$sample_name_2" \
         "$dir/$outfile_1.trimmed.fastq.gz" "$dir/$outfile_1.unpaired.fastq.gz" \
         "$dir/$outfile_2.trimmed.fastq.gz" "$dir/$outfile_2.unpaired.fastq.gz" \
-        ILLUMINACLIP:/users/3057556/aux/TruSeq3-PE-2.fa:2:30:10 \
+        ILLUMINACLIP:$$/conda-envs/trimmomatic_0.39/adaptors/TruSeq3-PE-2.fa:2:30:10 \
         LEADING:3 TRAILING:3 SLIDINGWINDOW:4:20 MINLEN:50
     done
   fi

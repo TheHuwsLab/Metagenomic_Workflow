@@ -1,19 +1,19 @@
 #!/bin/bash
 
-#SBATCH --job-name=Prepare_Yasmin_Contam_Jobs
-#SBATCH --error=/users/3057556/jobs/Prepare_Yasmin_Contam_Jobs.error
-#SBATCH --output=/users/3057556/jobs/Prepare_Yasmin_Contam_Jobs.txt
-#SBATCH --partition=k2-hipri
+#SBATCH --job-name=Prepare_$$_Contam_Jobs
+#SBATCH --error=/users/$$/jobs/Prepare_$$_Contam_Jobs.error
+#SBATCH --output=/users/$$/jobs/Prepare_$$_Contam_Jobs.txt
+#SBATCH --partition=$$
 #SBATCH --time=01:00:00  # Short time for job submission script
-#SBATCH --mail-user=n.dimonaco@qub.ac.uk
+#SBATCH --mail-user=$$
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 # Load required modules
 module load apps/anaconda3/2024.06/bin
 
 # Define paths
-WORK_DIR="/mnt/scratch2/users/3057556/Yasmin/testing/"
-JOB_DIR="/users/3057556/jobs/yasmin_contamination_jobs"
+WORK_DIR="/mnt/$$/data"
+JOB_DIR="/users/%%/jobs/%%_contamination_jobs"
 
 # Create a directory for job scripts if it doesn't exist
 mkdir -p "$JOB_DIR"

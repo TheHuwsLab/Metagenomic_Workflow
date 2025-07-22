@@ -1,27 +1,23 @@
 #!/bin/bash
 
-#SBATCH --cpus-per-task=20
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=40G
-#SBATCH --job-name=fastp_test
-#SBATCH --error=/users/3057556/jobs/fastp_test.error
-#SBATCH --output=/users/3057556/jobs/fastp_test.txt
+#SBATCH --job-name=fastp
+#SBATCH --error=/users/&&/jobs/fastp_&&.error
+#SBATCH --output=/users/&&/jobs/fastp_&&.txt
 #SBATCH --partition=k2-hipri
 #SBATCH --nodes=1
 #SBATCH --time=03:00:00
 #SBATCH --mail-user=n.dimonaco@qub.ac.uk
 #SBATCH --mail-type=BEGIN,END,FAIL
 
+# Activate the conda environment with fastp installed
 module load apps/anaconda3/2024.06/bin
+source activate /$$/conda-envs/fastp_1.0.1
 
-source activate /mnt/scratch2/igfs-anaconda/conda-envs/fastp_0.24.0
-
-
-#!/bin/bash
-
-#!/bin/bash
 
 # Define the parent directory containing subdirectories
-INPUT_DIR="/mnt/scratch2/users/3057556/testing/"
+INPUT_DIR="/$$/data"
 
 # Loop through each subdirectory in the input directory
 for subdir in "$INPUT_DIR"/*/; do
@@ -46,7 +42,7 @@ for subdir in "$INPUT_DIR"/*/; do
             fastp -i "$R1" -I "$R2" -o "$out_R1" -O "$out_R2" \
                   --unpaired1 "$out_unpaired_R1" --unpaired2 "$out_unpaired_R2" \
                   --html "$report_html"  --detect_adapter_for_pe \
-                  --thread 20 --qualified_quality_phred 20 --length_required 50
+                  --thread 8 --qualified_quality_phred 20 --length_required 50
 
             echo "Finished processing: $(basename "$subdir")"
         else
