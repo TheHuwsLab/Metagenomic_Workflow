@@ -13,7 +13,7 @@
 
 # Load the required modules
 module load apps/anaconda3/2024.06/bin
-source activate /mnt/scratch2/igfs-anaconda/conda-envs/bowtie2_2.5.1
+source activate /mnt/$$/conda-envs/bowtie2_2.5.1
 
 cd /mnt/$$/reference_genomes/rumen_contamination_genomes
 

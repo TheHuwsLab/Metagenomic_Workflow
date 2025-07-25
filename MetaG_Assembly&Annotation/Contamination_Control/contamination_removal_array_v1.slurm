@@ -26,7 +26,7 @@ DIR_TAG="PN"
 
 for dir in ./"$DIR_TAG"*; do
   if [[ -d "$dir" ]]; then
-    for file in "$dir"/*R1_001.fastq.gz; do # Change this pattern if your files have a different naming convention
+    for file in "$dir"/*R1_001.trimmed_paired.fastq.gz; do # Change this pattern if your files have a different naming convention
       filename=$(basename "$file")
       sample_name_1="${filename}"
       sample_name_2=$(echo "$sample_name_1" | sed 's/R1/R2/g')
@@ -60,7 +60,7 @@ for dir in ./"$DIR_TAG"*; do
 #SBATCH --partition=k2-hipri
 #SBATCH --nodes=1
 #SBATCH --time=03:00:00
-#SBATCH --mail-user=n.dimonaco@qub.ac.uk
+#SBATCH --mail-user=$$@qub.ac.uk
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 # Load required modules and activate conda environment
@@ -76,7 +76,11 @@ samtools view -b -f 12 - | \
 samtools sort -n - -o "$dir/$unmapped_sorted_bam"
 
 # Convert unmapped reads to FASTQ
-bedtools bamtofastq -i "$dir/$unmapped_sorted_bam" -fq "$dir/$unmapped_R1" -fq2 "$dir/$unmapped_R2"
+#bedtools bamtofastq -i "$dir/$unmapped_sorted_bam" -fq "$dir/$unmapped_R1" -fq2 "$dir/$unmapped_R2"
+## Use process substitution to compress the output files using pigz
+bedtools bamtofastq -i "$dir/$unmapped_sorted_bam" \
+  -fq >(pigz > "$dir/${unmapped_R1}.gz") \
+  -fq2 >(pigz > "$dir/${unmapped_R2}.gz")
 
 EOL
 

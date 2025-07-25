@@ -13,7 +13,7 @@
 
 # Activate the conda environment with Trimmomatic installed
 module load apps/anaconda3/2024.06/bin
-source activate /&&/conda-envs/trimmomatic_0.39/
+source activate /&&/conda-envs/trimmomatic_0.39
 
 
 # Change the working directory to where your samples are
@@ -30,8 +30,8 @@ for dir in ./*; do
 
       trimmomatic PE -phred33 -threads 8 \
         "$dir/$sample_name_1" "$dir/$sample_name_2" \
-        "$dir/$outfile_1.trimmed.fastq.gz" "$dir/$outfile_1.unpaired.fastq.gz" \
-        "$dir/$outfile_2.trimmed.fastq.gz" "$dir/$outfile_2.unpaired.fastq.gz" \
+        "$dir/$outfile_1.trimmed_paired.fastq.gz" "$dir/$outfile_1.trimmed_unpaired.fastq.gz" \
+        "$dir/$outfile_2.trimmed_paired.fastq.gz" "$dir/$outfile_2.trimmed_unpaired.fastq.gz" \
         ILLUMINACLIP:$$/conda-envs/trimmomatic_0.39/adaptors/TruSeq3-PE-2.fa:2:30:10 \
         LEADING:3 TRAILING:3 SLIDINGWINDOW:4:20 MINLEN:50
     done
