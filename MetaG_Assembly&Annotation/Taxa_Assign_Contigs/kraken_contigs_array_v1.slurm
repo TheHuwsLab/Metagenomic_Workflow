@@ -1,19 +1,19 @@
 #!/bin/bash
 
 #SBATCH --job-name=Prepare_Kraken2_Jobs
-#SBATCH --error=/users/3057556/jobs/Prepare_Kraken2_Jobs_Kayley.error
-#SBATCH --output=/users/3057556/jobs/Prepare_Kraken2_Jobs_Kayley.txt
+#SBATCH --error=/users/$$/jobs/Prepare_Kraken2_Jobs_$$.error
+#SBATCH --output=/users/$$/jobs/Prepare_Kraken2_Jobs_$$.txt
 #SBATCH --partition=k2-hipri
 #SBATCH --time=01:00:00  # Short time for job submission script
-#SBATCH --mail-user=n.dimonaco@qub.ac.uk
+#SBATCH --mail-user=$$@qub.ac.uk
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 # Load required modules
 module load apps/anaconda3/2024.06/bin
 
 # Define paths
-WORK_DIR="/mnt/scratch2/users/3057556/Kayley_Zhenbin/40-1049853816/Kayley/"
-JOB_DIR="/users/3057556/jobs/kraken2_jobs_kayley"
+WORK_DIR="/mnt/$$/data"
+JOB_DIR="/users/%%/jobs/%%_kraken2_contig_jobs"
 
 # Create a directory for job scripts if it doesn't exist
 mkdir -p "$JOB_DIR"
@@ -21,11 +21,11 @@ mkdir -p "$JOB_DIR"
 # Change to the working directory
 cd "$WORK_DIR" || exit
 
-# Specify data dir tag - First chars present in 'all' data sample dirs to be processed
-DIR_TAG="AT"
+# Define the directory tag for sample directories
+DIR_TAG="PN"
 
 # Define Kraken2 database
-DBNAME=/mnt/scratch2/igfs-anaconda/conda-dbs/kraken2/k2_pluspfp_20240904
+DBNAME=/$$/conda-dbs/kraken2/k2_pluspfp_20240904
 
 for dir in "${DIR_TAG}"*; do
   if [[ -d "$dir" ]]; then
@@ -56,12 +56,12 @@ for dir in "${DIR_TAG}"*; do
 #SBATCH --partition=k2-medpri
 #SBATCH --nodes=1
 #SBATCH --time=24:00:00
-#SBATCH --mail-user=n.dimonaco@qub.ac.uk
+#SBATCH --mail-user=$$@qub.ac.uk
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 module load apps/anaconda3/2024.06/bin
 
-source activate /mnt/scratch2/igfs-anaconda/conda-envs/kraken2_2.1.3
+source activate /mnt/$$/conda-envs/kraken2_2.1.3
 
 mkdir -p "$outdir"
 

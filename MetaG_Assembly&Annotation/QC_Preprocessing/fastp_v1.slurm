@@ -11,8 +11,10 @@
 #SBATCH --mail-user=n.dimonaco@qub.ac.uk
 #SBATCH --mail-type=BEGIN,END,FAIL
 
-# Activate the conda environment with fastp installed
+
 module load apps/anaconda3/2024.06/bin
+
+# Activate the conda environment with fastp installed
 source activate /$$/conda-envs/fastp_1.0.1
 
 

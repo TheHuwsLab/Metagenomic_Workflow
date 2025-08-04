@@ -43,6 +43,7 @@ for dir in ./"$DIR_TAG"*; do
 
         # Write the SLURM job script
         cat <<EOL > "$job_script"
+
 #!/bin/bash
 
 #SBATCH --cpus-per-task=30

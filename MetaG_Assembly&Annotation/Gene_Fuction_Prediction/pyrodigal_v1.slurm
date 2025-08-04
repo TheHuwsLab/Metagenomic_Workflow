@@ -11,24 +11,22 @@
 #SBATCH --mail-user=$$$@qub.ac.uk
 #SBATCH --mail-type=BEGIN,END,FAIL
 
-
-
 module load apps/anaconda3/2024.06/bin
-
 source activate /&&/conda-envs/pyrodigal_3.0.1
-
 
 cd /&&/data
 
+# Define the directory tag for sample directories
+DIR_TAG="PN"
+
 # Loop through all directories in the current folder
-for dir in ./*; do
+for dir in "${DIR_TAG}"*; do
   # Check if the element is a directory
   if [[ -d "$dir" ]]; then
     # Loop through all files matching the pattern in the subdirectories
     for file in "$dir"/*_unmapped_metaspades/contigs.fasta; do
       # Extract the sample name from the file path
       sample_name=$(echo $file | sed 's/\.\///;s/\/.*//')
-
       # Define the output directory and output file paths
       outdir="${sample_name}/${sample_name}_pyrodigal"
       pyrodigal_out_gff="${outdir}/${sample_name}_pyrodigal.gff"
@@ -36,17 +34,14 @@ for dir in ./*; do
       pyrodigal_out_aa="${outdir}/${sample_name}_pyrodigal_aa.fa"
 
       echo "$outdir"
-
       # Create the output directory
       mkdir "$outdir"
-
       # Run Pyrodigal with the specified input and output files
       pyrodigal -i "$file" \
                 -o "$pyrodigal_out_gff" \
                 -a "$pyrodigal_out_aa" \
                 -d "$pyrodigal_out_nt" \
                 -p meta -j 12
-
     done
   fi
 done

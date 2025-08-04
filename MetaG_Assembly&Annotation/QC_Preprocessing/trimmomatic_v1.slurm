@@ -11,10 +11,11 @@
 #SBATCH --mail-user=$$@qub.ac.uk
 #SBATCH --mail-type=BEGIN,END,FAIL
 
-# Activate the conda environment with Trimmomatic installed
-module load apps/anaconda3/2024.06/bin
-source activate /&&/conda-envs/trimmomatic_0.39
 
+module load apps/anaconda3/2024.06/bin
+
+# Activate the conda environment with Trimmomatic installed
+source activate /&&/conda-envs/trimmomatic_0.39
 
 # Change the working directory to where your samples are
 cd /&&/data
