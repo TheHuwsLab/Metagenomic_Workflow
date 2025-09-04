@@ -33,6 +33,12 @@ for dir in "${DIR_TAG}"*; do
       pyrodigal_out_nt="${outdir}/${sample_name}_pyrodigal_nt.fa"
       pyrodigal_out_aa="${outdir}/${sample_name}_pyrodigal_aa.fa"
 
+      # Check if all output files exist and are not empty
+      if [[ -s "$pyrodigal_out_gff" && -s "$pyrodigal_out_nt" && -s "$pyrodigal_out_aa" ]]; then
+        echo "All output files for $sample_name exist and are not empty. Skipping."
+        continue
+      fi
+
       echo "$outdir"
       # Create the output directory
       mkdir "$outdir"
