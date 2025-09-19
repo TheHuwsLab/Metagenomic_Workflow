@@ -26,7 +26,7 @@ DIR_TAG="PN"
 
 for dir in ./"$DIR_TAG"*; do
   if [[ -d "$dir" ]]; then
-    for file in "$dir"/*R1_001.trimmed_paired.fastq.gz; do # Change this pattern if your files have a different naming convention
+    for file in "$dir"/*R1_001_trimmed_paired.fastq.gz; do # Change this pattern if your files have a different naming convention
       filename=$(basename "$file")
       sample_name_1="${filename}"
       sample_name_2=$(echo "$sample_name_1" | sed 's/R1/R2/g')
@@ -48,8 +48,6 @@ for dir in ./"$DIR_TAG"*; do
 
       # Write the SLURM job script
       cat <<EOL > "$job_script"
-
-
 #!/bin/bash
 
 #SBATCH --cpus-per-task=30

@@ -31,8 +31,8 @@ for dir in ./*; do
 
       trimmomatic PE -phred33 -threads 8 \
         "$dir/$sample_name_1" "$dir/$sample_name_2" \
-        "$dir/$outfile_1.trimmed_paired.fastq.gz" "$dir/$outfile_1.trimmed_unpaired.fastq.gz" \
-        "$dir/$outfile_2.trimmed_paired.fastq.gz" "$dir/$outfile_2.trimmed_unpaired.fastq.gz" \
+        "$dir/$outfile_1_trimmed_paired.fastq.gz" "$dir/$outfile_1_trimmed_unpaired.fastq.gz" \
+        "$dir/$outfile_2_trimmed_paired.fastq.gz" "$dir/$outfile_2_trimmed_unpaired.fastq.gz" \
         ILLUMINACLIP:$$/conda-envs/trimmomatic_0.39/adaptors/TruSeq3-PE-2.fa:2:30:10 \
         LEADING:3 TRAILING:3 SLIDINGWINDOW:4:20 MINLEN:50
     done

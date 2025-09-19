@@ -1,4 +1,0 @@
-The Huws Lab Metagenome Assembly and Annotation 'pipeline'
-
-This folder contains the submission scripts used to clean, assemble and annotate shotgun metagenome samples.
-This is the 'core' pipeline that can be and is changed on a per-project basis.
