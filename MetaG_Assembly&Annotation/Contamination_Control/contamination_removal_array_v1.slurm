@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH --job-name=Prepare_$$_Contam_Jobs
-#SBATCH --error=/users/$$/jobs/Prepare_$$_Contam_Jobs.error
-#SBATCH --output=/users/$$/jobs/Prepare_$$_Contam_Jobs.txt
+#SBATCH --job-name=Prepare_$$_Contam_Jobs_
+#SBATCH --error=/users/$$/jobs/Prepare_$$_Contam_Jobs_%j.error
+#SBATCH --output=/users/$$/jobs/Prepare_$$_Contam_Jobs_%j.log
 #SBATCH --partition=$$
 #SBATCH --time=01:00:00  # Short time for job submission script
 #SBATCH --mail-user=$$
@@ -33,7 +33,7 @@ for dir in ./"$DIR_TAG"*; do
       sample_name=$(basename "$dir")  # Extract sample name
 
       # Define output filenames
-      unmapped_sorted_bam=$(echo "$sample_name_1" | sed 's/_R1_001.fastq.gz/_sorted_unmapped.bam/g')
+      unmapped_sorted_bam=$(echo "$sample_name_1" | sed 's/_R1_001.fastq.gz/_unmapped_sorted.bam/g')
       unmapped_R1=$(echo "$sample_name_1" | sed 's/_R1_001.fastq.gz/_mapped_R1.fastq/g')
       unmapped_R2=$(echo "$sample_name_1" | sed 's/_R1_001.fastq.gz/_mapped_R2.fastq/g')
 
@@ -53,8 +53,8 @@ for dir in ./"$DIR_TAG"*; do
 #SBATCH --cpus-per-task=30
 #SBATCH --mem=120G
 #SBATCH --job-name=ContCheck_${sample_name}
-#SBATCH --error=$JOB_DIR/${sample_name}_error.log
-#SBATCH --output=$JOB_DIR/${sample_name}_output.log
+#SBATCH --error=$JOB_DIR/${sample_name}_%j.error
+#SBATCH --output=$JOB_DIR/${sample_name}_%j.log
 #SBATCH --partition=k2-hipri
 #SBATCH --nodes=1
 #SBATCH --time=03:00:00
