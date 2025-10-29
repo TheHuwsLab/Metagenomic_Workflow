@@ -24,7 +24,7 @@ for dir in "${DIR_TAG}"*; do
   # Check if the element is a directory
   if [[ -d "$dir" ]]; then
     # Loop through all files matching the pattern in the subdirectories
-    for file in "$dir"/*_unmapped_metaspades/contigs.fasta; do
+    for file in "$dir"/*_metaspades/contigs.fasta; do
       # Extract the sample name from the file path
       sample_name=$(echo $file | sed 's/\.\///;s/\/.*//')
       # Define the output directory and output file paths
