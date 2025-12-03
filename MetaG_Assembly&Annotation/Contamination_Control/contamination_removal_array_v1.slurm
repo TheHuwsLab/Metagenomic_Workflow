@@ -42,7 +42,7 @@ for dir in ./"$DIR_TAG"*; do
 
       # Echo statements for debugging/logging
       echo "Directory: $dir"
-      echo "Unmapped Sorted Bamfile: $unmapped_sorted_bam" 
+      echo "Unmapped Sorted Bamfile: $unmapped_sorted_bam"
       echo "Job Script: $job_script"
       echo "----------------------"
 
