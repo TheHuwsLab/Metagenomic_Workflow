@@ -60,6 +60,23 @@ for TAG in "${DIR_TAGS[@]}"; do
 module load apps/anaconda3/2024.06/bin
 source activate /mnt/scratch2/igfs-anaconda/conda-envs/spades_4.2.0
 
+# safe-exit + success flag (place immediately after activating conda)
+set -euo pipefail
+SUCCESS_FLAG="$dir/${sample_name}_metaspades_assembly_done.flag"
+trap 'rc=$?; if [ "$rc" -eq 0 ]; then
+         printf "%s\n" "$(date --iso-8601=seconds)" > "$SUCCESS_FLAG"
+       else
+         rm -f "$SUCCESS_FLAG" 2>/dev/null || true
+       fi' EXIT
+
+PREV_FLAG="$dir/${sample_name}_decontamination_done.flag"
+if [[ ! -f "$PREV_FLAG" ]]; then
+  echo "ERROR: previous-step flag not found : $PREV_FLAG"
+  exit 1
+fi
+
+echo "Found previous-step flag: $PREV_FLAG"
+
 # Run MetaSPAdes
 metaspades.py -1 "$dir/$sample_name_1" -2 "$dir/$sample_name_2" -o "$dir/$outdir" -t 20 -m 300
 EOL

@@ -14,7 +14,7 @@
 module load apps/anaconda3/2024.06/bin
 
 # Define paths
-#WORK_DIR="/mnt/3057556/data"
+
 WORK_DIR="/mnt/scratch2/users/3057556/data/"
 JOB_DIR="/users/3057556/jobs/GL3_contamination_jobs"
 
@@ -69,6 +69,14 @@ for TAG in "${DIR_TAGS[@]}"; do
 module load apps/anaconda3/2024.06/bin
 source activate /mnt/scratch2/igfs-anaconda/conda-envs/bowtie2_2.5.1
 
+# safe-exit + success flag (place immediately after activating conda)
+set -euo pipefail
+SUCCESS_FLAG="$dir/${sample_name}_decontamination_done.flag"
+trap 'rc=$?; if [ "$rc" -eq 0 ]; then
+         printf "%s\n" "$(date --iso-8601=seconds)" > "$SUCCESS_FLAG"
+       else
+         rm -f "$SUCCESS_FLAG" 2>/dev/null || true
+       fi' EXIT
 
 # Run bowtie2 and pipe the output directly into samtools without writing intermediate files
 bowtie2 --threads 20  \
@@ -87,6 +95,8 @@ samtools fastq -@ 10 -f 12 "$dir/$sorted_bam" \
   -0 /dev/null -s /dev/null -n
 
 wait
+
+
 
 EOL
 
