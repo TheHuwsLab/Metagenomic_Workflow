@@ -27,7 +27,7 @@ DIR_TAGS=("E" "L")
 for TAG in "${DIR_TAGS[@]}"; do
   for dir in ./"$TAG"*; do
     if [[ -d "$dir" ]]; then
-      for file in "$dir"/*_unmapped_trimmed_R1.fastq.gz; do
+      for file in "$dir"/*_unmapped_trimmed_paired_R1.fastq.gz; do
         # Get the base filename of the R1 file
         filename=$(basename "$file")
         sample_name_1="${filename}"
@@ -70,7 +70,7 @@ trap 'rc=$?; if [ "$rc" -eq 0 ]; then
        fi' EXIT
 
 PREV_FLAG="$dir/${sample_name}_decontamination_done.flag"
-if [[ ! -f "$PREV_FLAG" ]]; then
+if [[ ! -f "$/PREV_FLAG" ]]; then
   echo "ERROR: previous-step flag not found : $PREV_FLAG"
   exit 1
 fi

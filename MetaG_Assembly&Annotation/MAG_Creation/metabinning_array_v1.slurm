@@ -84,25 +84,16 @@ mkdir -p "$concoct_dir"
 mkdir -p "$maxbin2_dir"
 mkdir -p "$metawrap_dir"
 
+echo "indexing contig read mapping BAM file..."
+source activate /mnt/scratch2/igfs-anaconda/conda-envs/samtools_1.21
+samtools index "$contig_readmapping_file"
+
 # ====================
 # Step 1: Run MetaBAT2
 # ====================
 echo "Running MetaBAT2..."
 source activate /mnt/scratch2/igfs-anaconda/conda-envs/metabat2_2.15 # Adjust path as needed
 
-# First, map reads to contigs to generate depth information
-# Index the contigs
-#bowtie2-build "$contigs_file" "$metabat2_dir/${sample_base}_contigs"
-
-# Map reads
-#bowtie2 -1 "$dir/$sample_name_1" -2 "$dir/$sample_name_2" \
-#  -x "$metabat2_dir/${sample_base}_contigs" \
-#  -S "$metabat2_dir/${sample_base}.sam" \
-#  -p 30
-
-# Convert SAM to sorted BAM
-#samtools view -bS "$metabat2_dir/${sample_base}.sam" | samtools sort -o "$metabat2_dir/${sample_base}.bam"
-#samtools index "$metabat2_dir/${sample_base}.bam"
 
 # Generate depth file
 jgi_summarize_bam_contig_depths --outputDepth "$MAG_dir/${sample_base}_depth.txt" $contig_readmapping_file
@@ -125,7 +116,7 @@ source activate /mnt/scratch2/igfs-anaconda/conda-envs/concoct_1.1.0  # Adjust p
 # Cut up contigs into smaller parts
 cut_up_fasta.py "$contigs_file" -c 10000 -o 0 --merge_last -b "$concoct_dir/${sample_base}_contigs_10K.bed" > "$concoct_dir/${sample_base}_contigs_10K.fa"
 
-# Use the BAM file from MetaBAT2 step
+
 # Generate coverage table
 concoct_coverage_table.py "$concoct_dir/${sample_base}_contigs_10K.bed" $contig_readmapping_file > "$concoct_dir/${sample_base}_coverage_table.tsv"
 
@@ -175,7 +166,8 @@ mkdir -p "$metawrap_dir/concoct_bins"
 mkdir -p "$metawrap_dir/maxbin2_bins"
 
 # Copy MetaBAT2 bins
-cp "$metabat2_dir"/*.fa "$metawrap_dir/metabat2_bins/" 2>/dev/null || echo "No MetaBAT2 bins found"
+cp "$metabat2_dir"/*.fa "$metawrap_dir/metabat2_bins/" 2>/dev/null || echo "No MetaBAT2 bins (.fa) found"
+cp "$metabat2_dir"/*.fasta "$metawrap_dir/metabat2_bins/" 2>/dev/null || echo "No MetaBAT2 bins (.fasta) found"
 
 # Copy CONCOCT bins (and rename to .fa if needed)
 for bin in "$concoct_dir/fasta_bins"/*.fa; do
