@@ -179,56 +179,210 @@ run_MaxBin.pl -contig "$contigs_file" \
 
 conda deactivate
 
-# ====================
-# Step 5: Run MetaWRAP Bin_refinement
-# ====================
-echo "Running MetaWRAP bin refinement..."
-source activate /mnt/scratch2/igfs-anaconda/conda-envs/metawrap  # Adjust path as needed
+# ==========================
+# Step 5: Run MAGScoT
+# ==========================
 
-# MetaWRAP expects bins to be in separate directories with .fa extension
-# Prepare bin directories
-mkdir -p "$metawrap_dir/metabat2_bins"
-mkdir -p "$metawrap_dir/comebin_bins"
-mkdir -p "$metawrap_dir/concoct_bins"
-mkdir -p "$metawrap_dir/maxbin2_bins"
+echo "Preparing MAGScoT input mappings..."
 
-# Copy MetaBAT2 bins
-cp "$metabat2_dir"/*.fa "$metawrap_dir/metabat2_bins/" 2>/dev/null || echo "No MetaBAT2 bins (.fa) found"
-cp "$metabat2_dir"/*.fasta "$metawrap_dir/metabat2_bins/" 2>/dev/null || echo "No MetaBAT2 bins (.fasta) found"
+magscot_dir="$MAG_dir/${sample_base}_magscot"
+magscot_refined_bins_dir="\$magscot_dir/refined_bins"
+mkdir -p "\$magscot_dir"
+mkdir -p "\$magscot_refined_bins_dir"
 
-# Copy COMEBin bins
-cp "$comebin_dir"/*.fa "$metawrap_dir/comebin_bins " 2>/dev/null || echo "No COMEBin bins (.fa) found"
-cp "$comebin_dir"/*.fasta "$metawrap_dir/comebin_bins " 2>/dev/null || echo "No COMEBin bins (.fasta) found"
+# Path to your MAGScoT installation — adjust as needed
+MAGSCOT_DIR="/mnt/scratch2/igfs-anaconda/MAGScoT"
 
-# Copy CONCOCT bins (and rename to .fa if needed)
+source activate /mnt/scratch2/igfs-anaconda/conda-envs/magscot
+
+
+# -------------------------------------------
+# Step 5a: ORF prediction with Prodigal
+# -------------------------------------------
+echo "Running Prodigal ORF prediction..."
+
+echo "Filtering contigs < 1500bp before Prodigal annotation..."
+
+filtered_contigs="$magscot_dir/${sample_base}_contigs_1500bp.fasta"
+
+awk '/^>/{header=\$0; seq=""} !/^>/{seq=seq\$0} /^>/{if(length(seq)>=1500) print header"\n"seq} END{if(length(seq)>=1500) print header"\n"seq}' \
+  "$contigs_file" > "\$filtered_contigs"
+
+echo "Contigs before filtering: \$(grep -c "^>" "$contigs_file")"
+echo "Contigs after filtering:  \$(grep -c "^>" "\$filtered_contigs")"
+
+if [[ ! -s "\$filtered_contigs" ]]; then
+  echo "ERROR: No contigs passed the 1500bp filter — cannot run Prodigal."
+  exit 1
+fi
+
+echo "Running Prodigal ORF prediction on filtered contigs..."
+prodigal \
+  -i "\$filtered_contigs" \
+  -p meta \
+  -a "$magscot_dir/${sample_base}_prodigal.faa" \
+  -d "$magscot_dir/${sample_base}_prodigal.ffn" \
+  -o "$magscot_dir/${sample_base}_prodigal.out"
+
+# -------------------------------------------
+# Step 5b: HMMer marker gene annotation
+# (GTDBtk r207 TIGRfam + Pfam marker HMMs)
+# -------------------------------------------
+echo "Running HMMer against GTDBtk r207 marker genes..."
+hmmsearch \
+  -o "$magscot_dir/${sample_base}_hmm_tigrfam.out" \
+  --tblout "$magscot_dir/${sample_base}_hmm_tigrfam_hits.out" \
+  --noali --notextw --cut_nc \
+  --cpu 20 \
+  "\$MAGSCOT_DIR/hmm/gtdbtk_rel207_tigrfam.hmm" \
+  "$magscot_dir/${sample_base}_prodigal.faa"
+
+hmmsearch \
+  -o "$magscot_dir/${sample_base}_hmm_pfam.out" \
+  --tblout "$magscot_dir/${sample_base}_hmm_pfam_hits.out" \
+  --noali --notextw --cut_nc \
+  --cpu 20 \
+  "\$MAGSCOT_DIR/hmm/gtdbtk_rel207_Pfam-A.hmm" \
+  "$magscot_dir/${sample_base}_prodigal.faa"
+
+# Parse HMMer output into 3-column format: gene_id, marker, e-value
+grep -v "^#" "$magscot_dir/${sample_base}_hmm_tigrfam_hits.out" \
+  | awk '{print \$1"\t"\$3"\t"\$5}' \
+  > "$magscot_dir/${sample_base}.tigr"
+
+grep -v "^#" "$magscot_dir/${sample_base}_hmm_pfam_hits.out" \
+  | awk '{print \$1"\t"\$4"\t"\$5}' \
+  > "$magscot_dir/${sample_base}.pfam"
+
+cat "$magscot_dir/${sample_base}.pfam" \
+    "$magscot_dir/${sample_base}.tigr" \
+    > "$magscot_dir/${sample_base}.hmm"
+
+# -------------------------------------------
+# Step 5c: Build 3-column contig-to-bin TSV
+# Format: BIN <tab> CONTIG <tab> BINNER
+# -------------------------------------------
+echo "Building contig-to-bin mapping TSV..."
+
+# MetaBAT2
+for bin in "$metabat2_dir"/*.fa; do
+  [[ -f "\$bin" ]] || continue
+  bin_name=\$(basename "\$bin" .fa)
+  grep "^>" "\$bin" | sed 's/>//' | awk -v b="\$bin_name" '{print b"\t"\$1"\tmetabat2"}'
+done > "$magscot_dir/${sample_base}_metabat2.contigs_to_bin.tsv"
+
+# COMEBin
+comebin_bins_dir="$comebin_dir/comebin_res/comebin_res_bins"
+for bin in "\$comebin_bins_dir"/*.fa; do
+  [[ -f "\$bin" ]] || continue
+  bin_name=\$(basename "\$bin" .fa)
+  grep "^>" "\$bin" | sed 's/>//' | awk -v b="\$bin_name" '{print b"\t"\$1"\tcomebin"}'
+done > "$magscot_dir/${sample_base}_comebin.contigs_to_bin.tsv"
+
+# CONCOCT
 for bin in "$concoct_dir/fasta_bins"/*.fa; do
-  if [[ -f "\$bin" ]]; then
-    cp "\$bin" "$metawrap_dir/concoct_bins/"
-  fi
-done
+  [[ -f "\$bin" ]] || continue
+  bin_name=\$(basename "\$bin" .fa)
+  grep "^>" "\$bin" | sed 's/>//' | awk -v b="\$bin_name" '{print b"\t"\$1"\tconcoct"}'
+done > "$magscot_dir/${sample_base}_concoct.contigs_to_bin.tsv"
 
-# Copy MaxBin2 bins (and rename to .fa if needed)
+# MaxBin2
 for bin in "$maxbin2_dir"/*.fasta; do
-  if [[ -f "\$bin" ]]; then
-    bin_name=\$(basename "\$bin" .fasta)
-    cp "\$bin" "$metawrap_dir/maxbin2_bins/\${bin_name}.fa"
-  fi
-done
+  [[ -f "\$bin" ]] || continue
+  bin_name=\$(basename "\$bin" .fasta)
+  grep "^>" "\$bin" | sed 's/>//' | awk -v b="\$bin_name" '{print b"\t"\$1"\tmaxbin2"}'
+done > "$magscot_dir/${sample_base}_maxbin2.contigs_to_bin.tsv"
 
-# Run MetaWRAP bin_refinement module
-metawrap bin_refinement \
-  -o "$metawrap_dir" \
-  -t 20 \
-  -A "$metawrap_dir/metabat2_bins" \
-  -B "$metawrap_dir/comebin_bins" \
-  -C "$metawrap_dir/concoct_bins" \
-  -D "$metawrap_dir/maxbin2_bins" \
-  -c 50 \
-  -x 10
+# Concatenate all into final input TSV (no header)
+magscot_input_tsv="$magscot_dir/${sample_base}_all.contigs_to_bin.tsv"
+cat \
+  "$magscot_dir/${sample_base}_metabat2.contigs_to_bin.tsv" \
+  "$magscot_dir/${sample_base}_comebin.contigs_to_bin.tsv" \
+  "$magscot_dir/${sample_base}_concoct.contigs_to_bin.tsv" \
+  "$magscot_dir/${sample_base}_maxbin2.contigs_to_bin.tsv" \
+  > "$magscot_dir/${sample_base}_all_contigs_to_bin.tsv"
 
-conda deactivate
 
-echo "Binning pipeline completed for ${sample_base}"
+if [[ ! -s "$magscot_dir/${sample_base}_all_contigs_to_bin.tsv"" ]]; then
+  echo "ERROR: MAGScoT input TSV is empty — no bins produced by any binner. Exiting."
+  exit 1
+fi
+
+# -------------------------------------------
+# Step 5d: Run MAGScoT
+# -------------------------------------------
+echo "Running MAGScoT refinement..."
+
+Rscript "\$MAGSCOT_DIR/MAGScoT.R" \
+  -i "\$magscot_input_tsv" \
+  --hmm "$magscot_dir/${sample_base}.hmm" \
+  -o "$magscot_dir/${sample_base}_magscot" \
+  -p bac120+ar53
+
+source deactivate
+
+# -------------------------------------------
+# Step 5e: Extract refined bin FASTAs
+# MAGScoT outputs <prefix>.refined.contig_to_bin.tsv
+# with 2 columns: BIN <tab> CONTIG
+# -------------------------------------------
+magscot_contig_map="$magscot_dir/${sample_base}_magscot.refined.contig_to_bin.out"
+
+if [[ ! -f "\$magscot_contig_map" ]]; then
+  echo "ERROR: MAGScoT refined contig map not found at \$magscot_contig_map"
+  exit 1
+fi
+
+echo "Extracting MAGScoT refined bin FASTAs..."
+
+python3 - <<PYEOF
+import os
+from collections import defaultdict
+
+fasta_path   = "$contigs_file"
+mapping_path = "\$magscot_contig_map"
+out_dir      = "\$magscot_refined_bins_dir"
+
+# Load contig sequences
+seqs = {}
+current = None
+with open(fasta_path) as fh:
+    for line in fh:
+        line = line.rstrip()
+        if line.startswith(">"):
+            current = line[1:].split()[0]
+            seqs[current] = []
+        else:
+            seqs[current].append(line)
+
+# Load bin assignments — MAGScoT output: BIN <tab> CONTIG
+bins = defaultdict(list)
+with open(mapping_path) as fh:
+    for line in fh:
+        parts = line.rstrip().split("\t")
+        if len(parts) < 2:
+            continue
+        bin_id, contig_id = parts[0], parts[1]
+        bins[bin_id].append(contig_id)
+
+written = 0
+for bin_id, contigs in bins.items():
+    out_path = os.path.join(out_dir, f"{bin_id}.fa")
+    with open(out_path, "w") as out:
+        for contig in contigs:
+            if contig in seqs:
+                out.write(f">{contig}\n" + "\n".join(seqs[contig]) + "\n")
+    written += 1
+
+print(f"Wrote {written} refined bin FASTAs to {out_dir}")
+PYEOF
+
+if [[ -z "\$(ls -A "\$magscot_refined_bins_dir"/*.fa 2>/dev/null)" ]]; then
+  echo "ERROR: No refined bin FASTAs found in \$magscot_refined_bins_dir after extraction."
+  exit 1
+fi
+
+echo "MAGScoT complete. \$(ls "\$magscot_refined_bins_dir"/*.fa | wc -l) refined bins produced."
 
 # ============================
 # Step 6: Run CheckM2

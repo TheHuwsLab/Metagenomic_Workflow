@@ -98,7 +98,7 @@ source activate /mnt/scratch2/igfs-anaconda/conda-envs/bowtie2_2.5.1
 mkdir -p "$dir/$outdir"
 
 # Build Bowtie2 database
-bowtie2-build "$dir/$contigs" "$dir/$bowtie_db" -p 10
+bowtie2-build "$dir/$contigs" "$dir/$bowtie_db"
 
 # Perform read mapping directly into a sorted BAM file (use a temp prefix)
 bowtie2 -x "$dir/$bowtie_db" -1 "$dir/$reads_file_1" -2 "$dir/$reads_file_2" --very-sensitive-local -p 10 | \
