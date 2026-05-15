@@ -66,13 +66,20 @@ source activate /mnt/scratch2/igfs-anaconda/conda-envs/kraken2_2.17.1
 
 mkdir -p "$outdir"
 
-# Run Kraken2 only if output files are missing or empty
+# Run Kraken2 only if final output files are missing or empty
 if [[ ! -s "$kraken_output" || ! -s "$report_mpa" || ! -s "$report" ]]; then
-  kraken2 --threads 10 --output "$kraken_output" --report "$report_mpa" \\
-    --db "$DBNAME" --use-names --use-mpa-style "$file"
 
-  kraken2 --threads 10 --output "$kraken_output" --report "$report" \\
-    --db "$DBNAME" --use-names "$file"
+  # 1. Filter contigs > 2.5kb and stream directly into Kraken2
+  seqtk seq -L 2500 "$file" | kraken2 --threads 10 \
+    --db "$DBNAME" \
+    --use-names \
+    --output "$kraken_output" \
+    --report "$report" \
+    /dev/stdin
+
+  # 2. Derive the MPA report instantly from the standard report without re-running classification
+  kraken-mpa-report --db "$DBNAME" "$report" > "$report_mpa"
+
 else
   echo "Skipping $sample_name - Kraken2 results already exist."
 fi
