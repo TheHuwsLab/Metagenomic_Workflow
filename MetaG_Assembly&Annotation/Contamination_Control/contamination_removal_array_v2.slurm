@@ -78,18 +78,21 @@ source activate /mnt/scratch2/igfs-anaconda/conda-envs/bowtie2_2.5.1
 SUCCESS_FLAG="$dir/${sample_name}_decontamination_done.flag"
 # ensure parent dir exists and make the trap robust (avoid failures inside trap)
 mkdir -p "$(dirname "$SUCCESS_FLAG")" || true
-trap 'rc=$?; if [ "${rc:-1}" -eq 0 ]; then mkdir -p "$(dirname "$SUCCESS_FLAG")" >/dev/null 2>&1 || true;
-printf "%s\n" "$(date --iso-8601=seconds)" > "$SUCCESS_FLAG" 2>/dev/null || true;
- else rm -f "$SUCCESS_FLAG" 2>/dev/null || true; fi' EXIT
+# FIXED: Escaped \$rc so it evaluates at job exit runtime, not generation runtime
+trap 'rc=\$?; if [ "\${rc:-1}" -eq 0 ]; then mkdir -p "\$(dirname "\$SUCCESS_FLAG")" >/dev/null 2>&1 || true; \
+printf "%s\n" "\$(date --iso-8601=seconds)" > "\$SUCCESS_FLAG" 2>/dev/null || true; \
+else rm -f "\$SUCCESS_FLAG" 2>/dev/null || true; fi' EXIT
+
 
 # Verify that fastp completed successfully before continuing
 FASTP_FLAG="$dir/fastp.succeed"
-if [[ -f "$/FASTP_FLAG" ]]; then
+if [[ -f "\$FASTP_FLAG" ]]; then
   printf "%s: %s found — proceeding with contamination check for sample %s\n" "$(date --iso-8601=seconds)" "$FASTP_FLAG" "$sample_name"
 else
   printf "%s: %s NOT found — aborting contamination check for sample %s\n" "$(date --iso-8601=seconds)" "$FASTP_FLAG" "$sample_name" >&2
   exit 1
 fi
+
 
 # Run bowtie2 and pipe the output directly into samtools without writing intermediate files
 bowtie2 --threads 20  \
@@ -115,7 +118,9 @@ samtools fastq -@ 10 \
     -F 256 -F 2048 \
     -1 "$dir/${unmapped_R1%.gz}" \
     -2 "$dir/${unmapped_R2%.gz}" \
-    -0 /dev/null -s /dev/null -n
+    -0 /dev/null -s /dev/null -n \
+    "$dir/$sorted_bam"
+
 
 # Then compress once samtools has fully finished
 pigz -p 10 -c "$dir/${unmapped_R1%.gz}" > "$dir/${unmapped_R1}" && rm "$dir/${unmapped_R1%.gz}"
