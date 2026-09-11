@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --job-name=Prepare_MetaSpades_Jobs
-#SBATCH --error=/users/3057556/jobs/Prepare_MetaSpades_Jobs_GL3_%j.error
-#SBATCH --output=/users/3057556/jobs/Prepare_MetaSpades_Jobs_GL3_%j.txt
+#SBATCH --error=/users/3057556/jobs/Prepare_MetaSpades_Jobs_DM_%j.error
+#SBATCH --output=/users/3057556/jobs/Prepare_MetaSpades_Jobs_DM_%j.txt
 #SBATCH --partition=k2-hipri
 #SBATCH --time=01:00:00  # Short time for job submission script
 #SBATCH --mail-user=n.dimonaco@qub.ac.uk
@@ -12,8 +12,8 @@
 module load apps/anaconda3/2024.06/bin
 
 # Define the path to the working directory
-WORK_DIR="/mnt/scratch2/users/3057556/data/"
-JOB_DIR="/users/3057556/jobs/metaspades_jobs_GL3"
+WORK_DIR="/mnt/scratch2/users/3057556/DawnMeats/Azenta/40-1311511016/00_fastq/samples/data/"
+JOB_DIR="/users/3057556/jobs/metaspades_jobs_DM"
 
 # Create a directory for job scripts if it doesn't exist
 mkdir -p "$JOB_DIR"
@@ -32,14 +32,15 @@ for TAG in "${DIR_TAGS[@]}"; do
         filename=$(basename "$file")
         sample_name_1="${filename}"
         sample_name_2=$(echo "$sample_name_1" | sed 's/R1/R2/g')
-        outdir=$(echo "$sample_name_1" | sed 's/_R1.fastq.gz/_metaspades/g') # Here is the output directory name
+        sample_name=$(echo "$sample_name_1" | sed 's/_unmapped_trimmed_paired_R1.fastq.gz//g')
+        outdir=$(echo "$sample_name_1" | sed 's/_unmapped_trimmed_paired_R1.fastq.gz/_metaspades/g') # Here is the output directory name
 
         # Check if the 'contigs.fasta' file already exists
         # Full path to the 'contigs.fasta' file
         contigs_file="$dir/$outdir/contigs.fasta"
         if [[ ! -s "$contigs_file" ]]; then # Does not exist or is empty
           # Define the job script name
-          job_script="$JOB_DIR/${filename%_unmapped_R1.fastq.gz}_metaspades_job.sh"
+          job_script="$JOB_DIR/${filename%_unmapped_trimmed_paired_R1.fastq.gz}_metaspades_job.sh"
 
           # Write the SLURM job script
           cat <<EOL > "$job_script"
@@ -47,9 +48,9 @@ for TAG in "${DIR_TAGS[@]}"; do
 
 #SBATCH --cpus-per-task=20
 #SBATCH --mem=300G
-#SBATCH --job-name=MetaSpades_${filename%_unmapped_R1.fastq.gz}
-#SBATCH --error=$JOB_DIR/${filename%_unmapped_R1.fastq.gz}_error.log
-#SBATCH --output=$JOB_DIR/${filename%_unmapped_R1.fastq.gz}_output.log
+#SBATCH --job-name=MetaSpades_${sample_name%}
+#SBATCH --error=$JOB_DIR/${sample_name%}_error.log
+#SBATCH --output=$JOB_DIR/${sample_name%}_output.log
 #SBATCH --partition=k2-medpri,k2-bioinf,k2-lowpri
 #SBATCH --nodes=1
 #SBATCH --time=24:00:00

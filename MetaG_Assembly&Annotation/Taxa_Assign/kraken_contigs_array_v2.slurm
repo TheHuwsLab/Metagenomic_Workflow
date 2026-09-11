@@ -25,7 +25,7 @@ cd "$WORK_DIR" || exit
 DIR_TAGS=("E" "L" "P")
 
 # Define Kraken2 database
-DBNAME=/mnt/scratch2/igfs-databases/Kraken2_DBs/k2_pluspfp_20251015/
+DBNAME=/mnt/scratch2/igfs-databases/Kraken2_DBs/k2_pluspfp_20260626
 
 for TAG in "${DIR_TAGS[@]}"; do
   for dir in ./"$TAG"*; do
