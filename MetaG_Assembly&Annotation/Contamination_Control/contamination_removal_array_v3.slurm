@@ -304,17 +304,22 @@ UNMAPPED_R2_TMP="\${UNMAPPED_R2%.gz}"
 
 rm -f "\$UNMAPPED_R1_TMP" "\$UNMAPPED_R2_TMP"
 
-samtools fastq \
-    -@ "\$SLURM_CPUS_PER_TASK" \
+samtools collate \
+    -@ "$SLURM_CPUS_PER_TASK" \
+    -u \
+    -O \
+    "$SORTED_BAM" \
+| samtools fastq \
+    -@ "$SLURM_CPUS_PER_TASK" \
     -f 12 \
-    -F 256 \
-    -F 2048 \
-    -1 "\$UNMAPPED_R1_TMP" \
-    -2 "\$UNMAPPED_R2_TMP" \
+    -F 0x900 \
+    -1 "$UNMAPPED_R1_TMP" \
+    -2 "$UNMAPPED_R2_TMP" \
     -0 /dev/null \
     -s /dev/null \
-    -n \
-    "\$SORTED_BAM"
+    -n
+
+
 
 # -------------------------------------------------------------------------
 # Compress unmapped FASTQ files
@@ -339,6 +344,7 @@ rm -f "\$UNMAPPED_R2_TMP"
 # Basic output validation
 # -------------------------------------------------------------------------
 
+
 if [[ ! -s "\$SORTED_BAM" ]]; then
     echo "ERROR: Sorted BAM was not created or is empty."
     exit 1
@@ -351,6 +357,17 @@ fi
 
 if [[ ! -f "\$UNMAPPED_R2" ]]; then
     echo "ERROR: Unmapped R2 FASTQ was not created."
+    exit 1
+fi
+
+R1_COUNT=$(gzip -cd "$UNMAPPED_R1" | awk 'END {print NR/4}')
+R2_COUNT=$(gzip -cd "$UNMAPPED_R2" | awk 'END {print NR/4}')
+
+echo "Unmapped paired R1 reads: $R1_COUNT"
+echo "Unmapped paired R2 reads: $R2_COUNT"
+
+if [[ "$R1_COUNT" -ne "$R2_COUNT" ]]; then
+    echo "ERROR: Unmapped R1/R2 files contain different numbers of reads." >&2
     exit 1
 fi
 

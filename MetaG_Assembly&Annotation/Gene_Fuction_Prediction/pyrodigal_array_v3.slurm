@@ -1,4 +1,4 @@
-#!/bin/bash
+  #!/bin/bash
 
 #SBATCH --job-name=Prepare_Pyrodigal_Jobs_Ran
 #SBATCH --cpus-per-task=1
