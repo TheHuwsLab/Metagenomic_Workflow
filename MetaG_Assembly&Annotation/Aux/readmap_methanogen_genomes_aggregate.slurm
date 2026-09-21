@@ -1,0 +1,416 @@
+#!/bin/bash
+#SBATCH --job-name=Aggregate_Methanogen_ReadMapping
+#SBATCH --error=/users/3057556/jobs/Aggregate_Methanogen_ReadMapping_KMG_%j.error
+#SBATCH --output=/users/3057556/jobs/Aggregate_Methanogen_ReadMapping_KMD_%j.txt
+#SBATCH --partition=k2-hipri
+#SBATCH --time=03:00:00
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=8
+#SBATCH --nodes=1
+#SBATCH --mail-user=n.dimonaco@qub.ac.uk
+#SBATCH --mail-type=BEGIN,END,FAIL
+
+# IMPORTANT naming convention:
+#   Reference names are GenomeID|ContigID
+#   e.g. ABYV00000000|ABYV02000001.1
+#
+# Therefore the aggregation explicitly splits each reference name at the FIRST
+# '|':
+#   Genome = ABYV00000000
+#   Contig = ABYV02000001.1
+
+set -euo pipefail
+
+module load apps/anaconda3/2024.06/bin
+
+source activate base
+
+WORK_DIR="/mnt/scratch2/users/3057556/Kayley_MetaG"
+INPUT_DIR="$WORK_DIR/27_Methanogens_Readmapped"
+OUTPUT_DIR="$INPUT_DIR/Aggregated"
+# A genome/reference is considered detected when at least this many mapped
+# primary alignments are present.
+MIN_MAPPED_READS=1
+REFERENCE_MAP="$INPUT_DIR/reference_to_genome.tsv"
+
+mkdir -p "$OUTPUT_DIR/combined" \
+         "$OUTPUT_DIR/matrices" \
+         "$OUTPUT_DIR/summaries" \
+         "$OUTPUT_DIR/visualisations" \
+         "$OUTPUT_DIR/metadata"
+if [[ -s "$REFERENCE_MAP" ]]; then
+    USE_REFERENCE_MAP=1
+else
+    USE_REFERENCE_MAP=0
+    REFERENCE_MAP=""
+fi
+
+[[ -d "$INPUT_DIR" ]] || { echo "ERROR: $INPUT_DIR does not exist" >&2; exit 1; }
+
+python3 <<PYTHON
+import csv
+import gzip
+import math
+from collections import defaultdict
+from pathlib import Path
+
+INPUT_DIR = Path(r"""$INPUT_DIR""")
+OUTPUT_DIR = Path(r"""$OUTPUT_DIR""")
+MIN_MAPPED_READS = int(r"""$MIN_MAPPED_READS""")
+
+COMBINED = OUTPUT_DIR / "combined"
+MATRICES = OUTPUT_DIR / "matrices"
+SUMMARIES = OUTPUT_DIR / "summaries"
+FIGURES = OUTPUT_DIR / "visualisations"
+META = OUTPUT_DIR / "metadata"
+
+
+def safe_int(x, default=0):
+    try:
+        return int(float(x))
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_float(x, default=0.0):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return default
+
+
+def write_tsv(path, rows, fields):
+    with path.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t", extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+
+
+def write_matrix(path, features, samples, data, fmt="float6"):
+    with path.open("w") as fh:
+        fh.write("Feature\t" + "\t".join(samples) + "\n")
+        for feature in features:
+            vals = []
+            for sample in samples:
+                x = data.get(feature, {}).get(sample, 0)
+                if fmt == "int":
+                    vals.append(str(int(round(x))))
+                elif fmt == "float4":
+                    vals.append(f"{x:.4f}")
+                else:
+                    vals.append(f"{x:.6f}")
+            fh.write(feature + "\t" + "\t".join(vals) + "\n")
+
+
+def parse_genome_contig(reference):
+    """Reference naming convention is GenomeID|ContigID."""
+    if "|" in reference:
+        return reference.split("|", 1)[0], reference.split("|", 1)[1]
+    # Defensive fallback for any reference without the delimiter.
+    return reference, reference
+
+
+sample_dirs = sorted(p for p in INPUT_DIR.iterdir() if p.is_dir() and p.name != "Aggregated_v2")
+
+all_rows = []
+sample_summary = []
+incomplete = []
+
+for sample_dir in sample_dirs:
+    sample = sample_dir.name
+    coverage_file = sample_dir / f"{sample}_reference_coverage.tsv"
+    mapping_summary = sample_dir / f"{sample}_mapping_summary.tsv"
+    idxstats = sample_dir / f"{sample}_readmapped_idxstats.txt"
+    flagstat = sample_dir / f"{sample}_readmapped_flagstat.txt"
+    done_flag = sample_dir / f"{sample}_readmapped_done.flag"
+
+    required = [coverage_file, mapping_summary, idxstats, flagstat, done_flag]
+    missing = [str(p) for p in required if not p.is_file() or p.stat().st_size == 0]
+    if missing:
+        incomplete.append({"Sample": sample, "Missing_File": ";".join(missing)})
+        continue
+
+    summary = {}
+    with mapping_summary.open() as fh:
+        for row in csv.DictReader(fh, delimiter="\t"):
+            if row.get("Field"):
+                summary[row["Field"]] = row.get("Value", "")
+
+    total_primary = safe_int(summary.get("Total_primary_alignments"))
+    mapped_primary = safe_int(summary.get("Mapped_primary_alignments"))
+    mapping_rate = safe_float(summary.get("Mapped_alignment_proportion"))
+
+    with coverage_file.open() as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        expected = {"Reference", "Length", "Mapped_Reads", "Covered_Bases", "Breadth", "Mean_Depth", "Mean_BaseQ", "Mean_MapQ"}
+        if not expected.issubset(reader.fieldnames or set()):
+            raise SystemExit(f"ERROR: Unexpected columns in {coverage_file}")
+
+        n_records = 0
+        for r in reader:
+            ref = r["Reference"].strip()
+            if not ref:
+                continue
+
+            genome, contig = parse_genome_contig(ref)
+            length = max(0, safe_int(r["Length"]))
+            mapped = max(0, safe_int(r["Mapped_Reads"]))
+            covered = max(0, safe_int(r["Covered_Bases"]))
+            if length:
+                covered = min(covered, length)
+            breadth = safe_float(r["Breadth"])
+            breadth = max(0.0, min(1.0, breadth))
+            depth = max(0.0, safe_float(r["Mean_Depth"]))
+            baseq = max(0.0, safe_float(r["Mean_BaseQ"]))
+            mapq = max(0.0, safe_float(r["Mean_MapQ"]))
+
+            all_rows.append({
+                "Sample": sample,
+                "Genome": genome,
+                "Contig": contig,
+                "Reference": ref,
+                "Length": length,
+                "Mapped_Reads": mapped,
+                "Covered_Bases": covered,
+                "Breadth": breadth,
+                "Mean_Depth": depth,
+                "Mean_BaseQ": baseq,
+                "Mean_MapQ": mapq,
+                "Relative_Mapped_Reads": mapped / mapped_primary if mapped_primary else 0.0,
+                "Fraction_All_Primary_Reads": mapped / total_primary if total_primary else 0.0,
+                "Detected": int(mapped >= MIN_MAPPED_READS),
+            })
+            n_records += 1
+
+    sample_summary.append({
+        "Sample": sample,
+        "Total_Primary_Alignments": total_primary,
+        "Mapped_Primary_Alignments": mapped_primary,
+        "Mapped_Alignment_Proportion": mapping_rate,
+        "Reference_Contigs_Observed": n_records,
+        "Reference_Contigs_Supported": sum(1 for x in all_rows if x["Sample"] == sample and x["Mapped_Reads"] >= MIN_MAPPED_READS),
+        "Genomes_Supported": len({x["Genome"] for x in all_rows if x["Sample"] == sample and x["Mapped_Reads"] >= MIN_MAPPED_READS}),
+    })
+
+if not all_rows:
+    raise SystemExit("ERROR: No completed sample coverage tables found.")
+
+samples = sorted({x["Sample"] for x in all_rows})
+references = sorted({x["Reference"] for x in all_rows})
+genomes = sorted({x["Genome"] for x in all_rows})
+
+# -------------------------------------------------------------------------
+# Save the explicit delimiter interpretation used.
+# -------------------------------------------------------------------------
+meta_rows = []
+for ref in references:
+    genome, contig = parse_genome_contig(ref)
+    meta_rows.append({
+        "Reference": ref,
+        "Genome": genome,
+        "Contig": contig,
+        "Rule": "split Reference on first |"
+    })
+write_tsv(META / "reference_to_genome.tsv", meta_rows, ["Reference", "Genome", "Contig", "Rule"])
+
+# -------------------------------------------------------------------------
+# Combined reference/contig-level table.
+# -------------------------------------------------------------------------
+all_rows.sort(key=lambda x: (x["Sample"], x["Genome"], x["Contig"]))
+combined_file = COMBINED / "SOPHIE_27methanogens_reference_coverage_all_samples.tsv.gz"
+fields = ["Sample", "Genome", "Contig", "Reference", "Length", "Mapped_Reads", "Covered_Bases", "Breadth", "Mean_Depth", "Mean_BaseQ", "Mean_MapQ", "Relative_Mapped_Reads", "Fraction_All_Primary_Reads", "Detected"]
+with gzip.open(combined_file, "wt", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t")
+    w.writeheader()
+    w.writerows(all_rows)
+
+# -------------------------------------------------------------------------
+# Reference-level matrices.
+# -------------------------------------------------------------------------
+def reference_metric(metric):
+    out = defaultdict(dict)
+    for x in all_rows:
+        key = (x["Reference"], x["Sample"])
+        out.setdefault(key[0], {})[key[1]] = safe_float(x[metric])
+    return out
+
+ref_mapped = reference_metric("Mapped_Reads")
+ref_depth = reference_metric("Mean_Depth")
+ref_breadth = reference_metric("Breadth")
+ref_relative = reference_metric("Relative_Mapped_Reads")
+
+write_matrix(MATRICES / "reference_mapped_reads.tsv", references, samples, ref_mapped, "int")
+write_matrix(MATRICES / "reference_relative_mapped_reads.tsv", references, samples, ref_relative)
+write_matrix(MATRICES / "reference_mean_depth.tsv", references, samples, ref_depth, "float4")
+write_matrix(MATRICES / "reference_breadth.tsv", references, samples, ref_breadth)
+
+# -------------------------------------------------------------------------
+# TRUE genome-level aggregation using GenomeID before '|'.
+# -------------------------------------------------------------------------
+grouped = defaultdict(list)
+for x in all_rows:
+    grouped[(x["Genome"], x["Sample"])].append(x)
+
+genome_rows = []
+for (genome, sample), rows in sorted(grouped.items()):
+    total_length = sum(x["Length"] for x in rows)
+    covered_bases = sum(x["Covered_Bases"] for x in rows)
+    mapped_reads = sum(x["Mapped_Reads"] for x in rows)
+    weighted_depth = (
+        sum(x["Mean_Depth"] * x["Length"] for x in rows) / total_length
+        if total_length else 0.0
+    )
+    weighted_baseq = (
+        sum(x["Mean_BaseQ"] * x["Length"] for x in rows) / total_length
+        if total_length else 0.0
+    )
+    weighted_mapq = (
+        sum(x["Mean_MapQ"] * x["Length"] for x in rows) / total_length
+        if total_length else 0.0
+    )
+    genome_rows.append({
+        "Sample": sample,
+        "Genome": genome,
+        "Contigs_in_Reference": len(rows),
+        "Genome_Length": total_length,
+        "Mapped_Reads": mapped_reads,
+        "Covered_Bases": covered_bases,
+        "Breadth": covered_bases / total_length if total_length else 0.0,
+        "Mean_Depth": weighted_depth,
+        "Mean_BaseQ": weighted_baseq,
+        "Mean_MapQ": weighted_mapq,
+        "Detected": int(mapped_reads >= MIN_MAPPED_READS),
+    })
+
+write_tsv(
+    COMBINED / "SOPHIE_27methanogens_genome_coverage_all_samples.tsv",
+    genome_rows,
+    ["Sample", "Genome", "Contigs_in_Reference", "Genome_Length", "Mapped_Reads", "Covered_Bases", "Breadth", "Mean_Depth", "Mean_BaseQ", "Mean_MapQ", "Detected"]
+)
+
+genome_mapped = defaultdict(dict)
+genome_depth = defaultdict(dict)
+genome_breadth = defaultdict(dict)
+for x in genome_rows:
+    genome_mapped[x["Genome"]][x["Sample"]] = x["Mapped_Reads"]
+    genome_depth[x["Genome"]][x["Sample"]] = x["Mean_Depth"]
+    genome_breadth[x["Genome"]][x["Sample"]] = x["Breadth"]
+
+write_matrix(MATRICES / "genome_mapped_reads.tsv", genomes, samples, genome_mapped, "int")
+write_matrix(MATRICES / "genome_mean_depth.tsv", genomes, samples, genome_depth, "float4")
+write_matrix(MATRICES / "genome_breadth.tsv", genomes, samples, genome_breadth)
+
+# Relative mapped reads and fraction of all primary reads at genome level.
+genome_relative = defaultdict(dict)
+genome_fraction_all = defaultdict(dict)
+for x in genome_rows:
+    ssum = next((s for s in sample_summary if s["Sample"] == x["Sample"]), None)
+    mapped_primary = ssum["Mapped_Primary_Alignments"] if ssum else 0
+    total_primary = ssum["Total_Primary_Alignments"] if ssum else 0
+    genome_relative[x["Genome"]][x["Sample"]] = x["Mapped_Reads"] / mapped_primary if mapped_primary else 0.0
+    genome_fraction_all[x["Genome"]][x["Sample"]] = x["Mapped_Reads"] / total_primary if total_primary else 0.0
+
+write_matrix(MATRICES / "genome_relative_mapped_reads.tsv", genomes, samples, genome_relative)
+write_matrix(MATRICES / "genome_fraction_all_primary_reads.tsv", genomes, samples, genome_fraction_all)
+
+# -------------------------------------------------------------------------
+# Genome-level summary and prevalence.
+# -------------------------------------------------------------------------
+genome_summary = []
+for genome in genomes:
+    rows = [x for x in genome_rows if x["Genome"] == genome]
+    detected = sorted(x["Sample"] for x in rows if x["Detected"])
+    genome_summary.append({
+        "Genome": genome,
+        "Samples_Analysed": len(samples),
+        "Samples_Detected": len(detected),
+        "Prevalence": len(detected) / len(samples) if samples else 0.0,
+        "Total_Mapped_Reads": sum(x["Mapped_Reads"] for x in rows),
+        "Mean_Genome_Breadth": sum(x["Breadth"] for x in rows) / len(rows) if rows else 0.0,
+        "Mean_Genome_Depth": sum(x["Mean_Depth"] for x in rows) / len(rows) if rows else 0.0,
+    })
+
+genome_summary.sort(key=lambda x: (-x["Samples_Detected"], -x["Total_Mapped_Reads"], x["Genome"]))
+write_tsv(SUMMARIES / "genome_summary.tsv", genome_summary, ["Genome", "Samples_Analysed", "Samples_Detected", "Prevalence", "Total_Mapped_Reads", "Mean_Genome_Breadth", "Mean_Genome_Depth"])
+write_tsv(SUMMARIES / "genome_prevalence.tsv", genome_summary, ["Genome", "Samples_Analysed", "Samples_Detected", "Prevalence", "Total_Mapped_Reads"])
+write_tsv(SUMMARIES / "sample_mapping_summary.tsv", sample_summary, ["Sample", "Total_Primary_Alignments", "Mapped_Primary_Alignments", "Mapped_Alignment_Proportion", "Reference_Contigs_Observed", "Reference_Contigs_Supported", "Genomes_Supported"])
+
+if incomplete:
+    write_tsv(SUMMARIES / "incomplete_or_missing_samples.tsv", incomplete, ["Sample", "Missing_File"])
+
+# -------------------------------------------------------------------------
+# Simple visualisations.
+# -------------------------------------------------------------------------
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    def plot_heatmap(data, features, title, xlabel, ylabel, filename, vmin=None, vmax=None, log=False):
+        plot_features = features
+        plot_samples = samples
+        arr = np.array([[data.get(f, {}).get(s, 0.0) for s in plot_samples] for f in plot_features], dtype=float)
+        if log:
+            arr = np.log10(arr + 1.0)
+        fig, ax = plt.subplots(figsize=(max(10, 0.18 * len(plot_samples) + 6), max(6, 0.23 * len(plot_features) + 2)))
+        im = ax.imshow(arr, aspect="auto", interpolation="nearest", vmin=vmin, vmax=vmax)
+        ax.set_title(title)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(range(len(plot_samples)))
+        ax.set_xticklabels(plot_samples, rotation=90, fontsize=6)
+        ax.set_yticks(range(len(plot_features)))
+        ax.set_yticklabels(plot_features, fontsize=7)
+        fig.colorbar(im, ax=ax)
+        fig.tight_layout()
+        fig.savefig(FIGURES / filename, dpi=200)
+        plt.close(fig)
+
+    plot_heatmap(genome_mapped, genomes, "Methanogen genomes: log10(mapped reads + 1)", "Sample", "Genome", "genome_mapped_reads_heatmap.png", log=True)
+    plot_heatmap(genome_breadth, genomes, "Methanogen genomes: breadth of coverage", "Sample", "Genome", "genome_breadth_heatmap.png", vmin=0, vmax=1)
+    plot_heatmap(genome_depth, genomes, "Methanogen genomes: mean depth", "Sample", "Genome", "genome_mean_depth_heatmap.png")
+
+    top = sorted(genome_summary, key=lambda x: x["Total_Mapped_Reads"], reverse=True)
+    names = [x["Genome"] for x in reversed(top)]
+    vals = [x["Total_Mapped_Reads"] for x in reversed(top)]
+    fig, ax = plt.subplots(figsize=(10, max(6, 0.28 * len(names) + 2)))
+    ax.barh(names, vals)
+    ax.set_xlabel("Total mapped reads")
+    ax.set_ylabel("Methanogen genome")
+    ax.set_title("Methanogen genome support across samples")
+    fig.tight_layout()
+    fig.savefig(FIGURES / "genome_total_mapped_reads.png", dpi=200)
+    plt.close(fig)
+
+    vals = [100 * x["Prevalence"] for x in reversed(top)]
+    fig, ax = plt.subplots(figsize=(10, max(6, 0.28 * len(names) + 2)))
+    ax.barh(names, vals)
+    ax.set_xlabel("Samples detected (%)")
+    ax.set_ylabel("Methanogen genome")
+    ax.set_title(f"Methanogen genome prevalence (>= {MIN_MAPPED_READS} mapped read{'s' if MIN_MAPPED_READS != 1 else ''})")
+    ax.set_xlim(0, 100)
+    fig.tight_layout()
+    fig.savefig(FIGURES / "genome_prevalence.png", dpi=200)
+    plt.close(fig)
+except Exception as exc:
+    (SUMMARIES / "plotting_error.txt").write_text(f"{type(exc).__name__}: {exc}\n")
+
+manifest = [
+    ("Input_directory", str(INPUT_DIR)),
+    ("Output_directory", str(OUTPUT_DIR)),
+    ("Samples_with_results", str(len(samples))),
+    ("References_observed", str(len(references))),
+    ("Genomes_observed", str(len(genomes))),
+    ("Genome_naming_rule", "Reference split on first |; left side is GenomeID"),
+    ("Minimum_mapped_reads_for_detection", str(MIN_MAPPED_READS)),
+]
+with (SUMMARIES / "aggregation_manifest.tsv").open("w") as fh:
+    fh.write("Field\tValue\n")
+    for k, v in manifest:
+        fh.write(f"{k}\t{v}\n")
+
+print(f"Completed aggregation: {len(samples)} samples, {len(genomes)} genomes, {len(references)} reference contigs")
+print(f"Output: {OUTPUT_DIR}")
+PYTHON
+

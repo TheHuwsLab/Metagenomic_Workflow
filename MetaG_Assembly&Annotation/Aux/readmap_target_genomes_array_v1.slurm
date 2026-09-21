@@ -32,7 +32,7 @@ BT_DB="/mnt/scratch2/users/3057556/databases/methanogen_genomes/CP001719_1/CP001
 # Loop through each sample directory
 for dir in ./*; do
     if [[ -d "$dir" ]]; then
-        for file in "$dir"/*_unmapped_R1.fastq*; do
+        for file in "$dir"/*_unmapped_trimmed_paired_R1.fastq.gz*; do
             if [[ -f "$file" ]]; then
                 # Get sample-specific variables
                 filename=$(basename "$file")
