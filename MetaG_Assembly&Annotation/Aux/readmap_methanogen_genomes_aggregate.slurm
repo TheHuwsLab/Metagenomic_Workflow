@@ -217,7 +217,7 @@ write_tsv(META / "reference_to_genome.tsv", meta_rows, ["Reference", "Genome", "
 # Combined reference/contig-level table.
 # -------------------------------------------------------------------------
 all_rows.sort(key=lambda x: (x["Sample"], x["Genome"], x["Contig"]))
-combined_file = COMBINED / "SOPHIE_27methanogens_reference_coverage_all_samples.tsv.gz"
+combined_file = COMBINED / "reference_coverage_all_samples.tsv.gz"
 fields = ["Sample", "Genome", "Contig", "Reference", "Length", "Mapped_Reads", "Covered_Bases", "Breadth", "Mean_Depth", "Mean_BaseQ", "Mean_MapQ", "Relative_Mapped_Reads", "Fraction_All_Primary_Reads", "Detected"]
 with gzip.open(combined_file, "wt", newline="") as fh:
     w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t")
@@ -283,7 +283,7 @@ for (genome, sample), rows in sorted(grouped.items()):
     })
 
 write_tsv(
-    COMBINED / "SOPHIE_27methanogens_genome_coverage_all_samples.tsv",
+    COMBINED / "genome_coverage_all_samples.tsv",
     genome_rows,
     ["Sample", "Genome", "Contigs_in_Reference", "Genome_Length", "Mapped_Reads", "Covered_Bases", "Breadth", "Mean_Depth", "Mean_BaseQ", "Mean_MapQ", "Detected"]
 )
