@@ -2,7 +2,7 @@
 
 #SBATCH --job-name=Prepare_Pyro_Eggnog_Ran
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=1G
+#SBATCH --mem=50G
 #SBATCH --error=/users/3057556/jobs/Prepare_Pyro_Eggnog_Ran_%j.error
 #SBATCH --output=/users/3057556/jobs/Prepare_Pyro_Eggnog_Ran_%j.log
 #SBATCH --partition=k2-medpri,k2-bioinf,k2-lowpri
@@ -13,6 +13,8 @@
 
 # =========================================================================
 # Combined Pyrodigal + eggNOG-mapper preparation/submission script
+# Reinvestigated: quoted child-job heredocs, restart-safe success flags,
+# nonzero-only failure traps, explicit sbatch error handling, and child-script syntax checks.
 #
 # Workflow:
 #
@@ -77,13 +79,16 @@ DIR_TAGS=("4" "N" "P")
 # Resource requests
 # -------------------------------------------------------------------------
 
-PYRO_CPUS=10
+PYRO_CPUS=8
 PYRO_MEM=100G
 PYRO_TIME="03:00:00"
 
-EGGNOG_CPUS=20
+EGGNOG_CPUS=16
 EGGNOG_MEM=200G
 EGGNOG_TIME="24:00:00"
+
+# Current account name, with a fallback for unusual batch environments.
+SLURM_USER="${USER:-$(id -un)}"
 
 # -------------------------------------------------------------------------
 # Minimum assembly size warning threshold
@@ -166,7 +171,7 @@ check_assembly() {
     # to perform complete FASTA validation using awk/sed.
     # ---------------------------------------------------------------------
 
-    python - "$contigs" "$qc_file" "$MIN_ASSEMBLY_BP_WARNING" <<'PY'
+    if ! python - "$contigs" "$qc_file" "$MIN_ASSEMBLY_BP_WARNING" "$sample" <<'PY'
 
 import sys
 from collections import Counter
@@ -174,6 +179,7 @@ from collections import Counter
 fasta = sys.argv[1]
 qc_file = sys.argv[2]
 min_warning = int(sys.argv[3])
+sample = sys.argv[4]
 
 valid_bases = set("ACGTNacgtn")
 
@@ -440,6 +446,10 @@ if warning:
     print(warning)
 
 PY
+    then
+        echo "ERROR: Assembly QC Python validation failed."
+        return 1
+    fi
 
     if [[ ! -s "$qc_file" ]]; then
 
@@ -454,6 +464,30 @@ PY
     return 0
 }
 
+
+# =========================================================================
+# Helper: return the first active Slurm job ID for a job name.
+#
+# This prevents a second preparation run from submitting duplicate jobs
+# while an earlier Pyrodigal/eggNOG job is still pending or running.
+# =========================================================================
+
+get_active_job_id() {
+
+    local job_name="$1"
+    local job_id=""
+
+    job_id=$(
+        squeue \
+            -h \
+            -u "$SLURM_USER" \
+            -n "$job_name" \
+            -o "%A" 2>/dev/null \
+        | awk 'NF {print $1; exit}'
+    ) || true
+
+    printf '%s\n' "$job_id"
+}
 
 # =========================================================================
 # 5. Loop through samples
@@ -605,10 +639,17 @@ for TAG in "${DIR_TAGS[@]}"; do
         EGGNOG_XLSX="${EGGNOG_DIR}/${EGGNOG_PREFIX}.emapper.annotations.xlsx"
 
         EGGNOG_ANNOTATIONS="${EGGNOG_DIR}/${EGGNOG_PREFIX}.emapper.annotations"
+        EGGNOG_HITS="${EGGNOG_DIR}/${EGGNOG_PREFIX}.emapper.hits"
+        EGGNOG_SEED_ORTHOLOGS="${EGGNOG_DIR}/${EGGNOG_PREFIX}.emapper.seed_orthologs"
+        EGGNOG_GFF="${EGGNOG_DIR}/${EGGNOG_PREFIX}.emapper.decorated.gff"
 
         EGGNOG_FLAG="${EGGNOG_DIR}/${sample_name}_eggnogmapper.success"
 
         EGGNOG_QC="${EGGNOG_DIR}/${sample_name}_eggnogmapper_qc.tsv"
+
+        # Final sample-level flag indicating that the complete functional
+        # pipeline (Pyrodigal + eggNOG-mapper + QC) is complete.
+        FUNCTIONAL_FLAG="${dir}/${sample_name}_functional.success"
 
         EGGNOG_JOB="${JOB_DIR}/${sample_name}_eggnogMapper_job.sh"
 
@@ -616,13 +657,32 @@ for TAG in "${DIR_TAGS[@]}"; do
         # 5G. Check whether eggNOG is already complete
         # =================================================================
 
-        if [[ -f "$EGGNOG_FLAG" \
+        # A valid eggNOG stage requires all expected output files and QC.
+        # If those outputs are present but the success flag is missing,
+        # recover the missing flag rather than rerunning eggNOG.
+        if [[ -s "$EGGNOG_ANNOTATIONS" \
               && -s "$EGGNOG_XLSX" \
+              && -s "$EGGNOG_HITS" \
+              && -s "$EGGNOG_SEED_ORTHOLOGS" \
+              && -s "$EGGNOG_GFF" \
               && -s "$EGGNOG_QC" ]]; then
 
-            echo
-            echo "eggNOG-mapper already completed:"
-            echo "  $EGGNOG_FLAG"
+            if [[ -f "$EGGNOG_FLAG" ]]; then
+
+                echo
+                echo "eggNOG-mapper already completed:"
+                echo "  $EGGNOG_FLAG"
+
+            else
+
+                echo
+                echo "eggNOG-mapper outputs and QC are complete, but the"
+                echo "eggNOG success flag is missing. Creating:"
+                echo "  $EGGNOG_FLAG"
+
+                printf "%s\n" "$(date --iso-8601=seconds)" > "$EGGNOG_FLAG"
+
+            fi
 
             EGGNOG_COMPLETE=1
 
@@ -633,11 +693,29 @@ for TAG in "${DIR_TAGS[@]}"; do
         fi
 
         # =================================================================
-        # 5H. If both stages are complete, nothing to submit
+        # 5H. If both stages are complete, ensure the final combined
+        #     functional success flag exists.
         # =================================================================
 
         if [[ "$PYRO_COMPLETE" -eq 1 \
               && "$EGGNOG_COMPLETE" -eq 1 ]]; then
+
+            if [[ ! -f "$FUNCTIONAL_FLAG" ]]; then
+
+                echo
+                echo "Pyrodigal and eggNOG-mapper are complete, but the final"
+                echo "functional success flag is missing. Creating:"
+                echo "  $FUNCTIONAL_FLAG"
+
+                printf "%s\n" "$(date --iso-8601=seconds)" > "$FUNCTIONAL_FLAG"
+
+            else
+
+                echo
+                echo "Final functional success flag already exists:"
+                echo "  $FUNCTIONAL_FLAG"
+
+            fi
 
             echo
             echo "============================================================"
@@ -654,21 +732,41 @@ for TAG in "${DIR_TAGS[@]}"; do
 
         if [[ "$PYRO_COMPLETE" -eq 0 ]]; then
 
-            echo
-            echo "Preparing Pyrodigal job."
+            PYRO_JOB_ID=$(get_active_job_id "Pyrodigal_${sample_name}")
 
+            if [[ -n "$PYRO_JOB_ID" ]]; then
+
+                echo
+                echo "Pyrodigal job already queued/running for $sample_name."
+                echo "  Job ID: $PYRO_JOB_ID"
+                echo "No duplicate Pyrodigal job will be submitted."
+
+            else
+
+                echo
+                echo "Preparing Pyrodigal job."
+
+                # ---------------------------------------------------------
+                # Remove incomplete Pyrodigal outputs.
+                # ---------------------------------------------------------
+
+                mkdir -p "$PYRO_DIR"
+
+                rm -f \
+                    "$PYRO_GFF" \
+                    "$PYRO_NT" \
+                    "$PYRO_AA" \
+                    "$PYRO_QC" \
+                    "$PYRO_FLAG" \
+                    "$FUNCTIONAL_FLAG"
+
+                # ---------------------------------------------------------
+                # Generate the Pyrodigal child job.
+            #
+            # The runtime body is a QUOTED heredoc. This is essential under
+            # set -u: the parent preparation script must not expand child-job
+            # variables such as $?, $1, $SLURM_*, or $file.
             # -------------------------------------------------------------
-            # Remove incomplete Pyrodigal outputs.
-            # -------------------------------------------------------------
-
-            mkdir -p "$PYRO_DIR"
-
-            rm -f \
-                "$PYRO_GFF" \
-                "$PYRO_NT" \
-                "$PYRO_AA" \
-                "$PYRO_QC" \
-                "$PYRO_FLAG"
 
             cat > "$PYRO_JOB" <<EOL
 #!/bin/bash
@@ -686,81 +784,75 @@ for TAG in "${DIR_TAGS[@]}"; do
 
 set -euo pipefail
 
+EOL
+
+            # Preparation-time configuration is written as shell-quoted literals.
+            printf 'PYRODIGAL_ENV=%q\n' "$PYRODIGAL_ENV" >> "$PYRO_JOB"
+            printf 'CONTIGS=%q\n' "$contigs_file" >> "$PYRO_JOB"
+            printf 'OUT_DIR=%q\n' "$PYRO_DIR" >> "$PYRO_JOB"
+            printf 'GFF=%q\n' "$PYRO_GFF" >> "$PYRO_JOB"
+            printf 'NT=%q\n' "$PYRO_NT" >> "$PYRO_JOB"
+            printf 'AA=%q\n' "$PYRO_AA" >> "$PYRO_JOB"
+            printf 'ASSEMBLY_QC=%q\n' "$ASSEMBLY_QC" >> "$PYRO_JOB"
+            printf 'PREV_FLAG=%q\n' "$metaspades_flag" >> "$PYRO_JOB"
+            printf 'SUCCESS_FLAG=%q\n' "$PYRO_FLAG" >> "$PYRO_JOB"
+            printf 'PYRO_QC=%q\n' "$PYRO_QC" >> "$PYRO_JOB"
+            printf 'FUNCTIONAL_FLAG=%q\n' "$FUNCTIONAL_FLAG" >> "$PYRO_JOB"
+            printf 'SAMPLE_NAME=%q\n' "$sample_name" >> "$PYRO_JOB"
+
+            cat >> "$PYRO_JOB" <<'PYRO_BODY'
+
 module load apps/anaconda3/2024.06/bin
-
-source activate ${PYRODIGAL_ENV}
-
-CONTIGS="${contigs_file}"
-
-OUT_DIR="${PYRO_DIR}"
-
-GFF="${PYRO_GFF}"
-
-NT="${PYRO_NT}"
-
-AA="${PYRO_AA}"
-
-ASSEMBLY_QC="${ASSEMBLY_QC}"
-
-PREV_FLAG="${metaspades_flag}"
-
-SUCCESS_FLAG="${PYRO_FLAG}"
-
-PYRO_QC="${PYRO_QC}"
+source activate "$PYRODIGAL_ENV"
 
 # =========================================================================
 # Failure handling
 # =========================================================================
 
 cleanup_on_failure() {
+    local exit_code="$1"
 
-    rc=$?
+    # Prevent recursion if this function exits explicitly.
+    trap - EXIT
 
-    if [[ $rc -ne 0 ]]; then
+    if (( exit_code != 0 )); then
         echo
-        echo "ERROR: eggNOG-mapper pipeline failed for ${sample_name}."
-        echo "The failure may have occurred during eggNOG execution or output validation."
+        echo "ERROR: Pyrodigal pipeline failed for ${SAMPLE_NAME}."
+        echo "Exit status: ${exit_code}"
         rm -f "$SUCCESS_FLAG"
+        rm -f "$FUNCTIONAL_FLAG"
     fi
 
-    exit $rc
+    exit "$exit_code"
 }
 
-trap cleanup_on_failure EXIT
+# Evaluate $? only when the child job's EXIT trap runs.
+trap 'cleanup_on_failure "$?"' EXIT
 
 # =========================================================================
 # Verify MetaSPAdes
 # =========================================================================
 
-if [[ ! -f "\$PREV_FLAG" ]]; then
-
+if [[ ! -f "$PREV_FLAG" ]]; then
     echo "ERROR: MetaSPAdes completion flag missing:"
-    echo "\$PREV_FLAG"
-
+    echo "  $PREV_FLAG"
     exit 1
-
 fi
 
 # =========================================================================
 # Verify assembly
 # =========================================================================
 
-if [[ ! -s "\$CONTIGS" ]]; then
-
+if [[ ! -s "$CONTIGS" ]]; then
     echo "ERROR: Assembly missing or empty:"
-    echo "\$CONTIGS"
-
+    echo "  $CONTIGS"
     exit 1
-
 fi
 
-if [[ ! -s "\$ASSEMBLY_QC" ]]; then
-
+if [[ ! -s "$ASSEMBLY_QC" ]]; then
     echo "ERROR: Assembly QC file missing:"
-    echo "\$ASSEMBLY_QC"
-
+    echo "  $ASSEMBLY_QC"
     exit 1
-
 fi
 
 # =========================================================================
@@ -771,53 +863,43 @@ echo
 echo "============================================================"
 echo "Pyrodigal"
 echo "============================================================"
-
 echo "Sample:"
-echo "  ${sample_name}"
-
+echo "  $SAMPLE_NAME"
 echo "Assembly:"
-echo "  \$CONTIGS"
-
+echo "  $CONTIGS"
 echo "Output:"
-echo "  \$OUT_DIR"
-
+echo "  $OUT_DIR"
 echo "Threads:"
-echo "  \$SLURM_CPUS_PER_TASK"
-
+echo "  $SLURM_CPUS_PER_TASK"
 echo
 
-mkdir -p "\$OUT_DIR"
+mkdir -p "$OUT_DIR"
 
 pyrodigal \
-    -i "\$CONTIGS" \
-    -o "\$GFF" \
-    -a "\$AA" \
-    -d "\$NT" \
+    -i "$CONTIGS" \
+    -o "$GFF" \
+    -a "$AA" \
+    -d "$NT" \
     -p meta \
-    -j "\$SLURM_CPUS_PER_TASK"
+    -j "$SLURM_CPUS_PER_TASK"
 
 # =========================================================================
 # Validate Pyrodigal outputs
 # =========================================================================
 
-for file in "\$GFF" "\$NT" "\$AA"; do
-
-    if [[ ! -s "\$file" ]]; then
-
+for file in "$GFF" "$NT" "$AA"; do
+    if [[ ! -s "$file" ]]; then
         echo "ERROR: Missing/empty Pyrodigal output:"
-        echo "  \$file"
-
+        echo "  $file"
         exit 1
-
     fi
-
 done
 
 # =========================================================================
 # Pyrodigal output consistency QC
 # =========================================================================
 
-python - "\$GFF" "\$NT" "\$AA" "\$PYRO_QC" "${sample_name}" <<'PY'
+python - "$GFF" "$NT" "$AA" "$PYRO_QC" "$SAMPLE_NAME" <<'PY'
 
 import sys
 
@@ -998,31 +1080,35 @@ PY
 # Final validation
 # =========================================================================
 
-if [[ ! -s "\$PYRO_QC" ]]; then
-
+if [[ ! -s "$PYRO_QC" ]]; then
     echo "ERROR: Pyrodigal QC file missing."
-
     exit 1
-
 fi
 
 # =========================================================================
 # Success flag
 # =========================================================================
 
-printf "%s\n" "\$(date --iso-8601=seconds)" > "\$SUCCESS_FLAG"
+printf "%s\n" "$(date --iso-8601=seconds)" > "$SUCCESS_FLAG"
 
 echo
 echo "============================================================"
 echo "Pyrodigal completed successfully"
 echo "============================================================"
-
 echo "Success flag:"
-echo "  \$SUCCESS_FLAG"
+echo "  $SUCCESS_FLAG"
 
-EOL
+PYRO_BODY
 
             chmod +x "$PYRO_JOB"
+
+            # Validate the generated child script before submitting it.
+            if ! bash -n "$PYRO_JOB"; then
+                echo
+                echo "ERROR: Generated Pyrodigal job failed bash syntax validation:"
+                echo "  $PYRO_JOB"
+                exit 1
+            fi
 
             # -------------------------------------------------------------
             # Submit Pyrodigal
@@ -1032,7 +1118,21 @@ EOL
             echo "Submitting Pyrodigal:"
             echo "  $PYRO_JOB"
 
-            PYRO_SUBMIT_OUTPUT=$(sbatch "$PYRO_JOB")
+            PYRO_SUBMIT_OUTPUT=""
+
+            if PYRO_SUBMIT_OUTPUT=$(sbatch "$PYRO_JOB" 2>&1); then
+                :
+            else
+                PYRO_SUBMIT_RC=$?
+
+                echo
+                echo "ERROR: Failed to submit Pyrodigal job for $sample_name."
+                echo "sbatch exit status: $PYRO_SUBMIT_RC"
+                echo "sbatch output:"
+                echo "$PYRO_SUBMIT_OUTPUT"
+
+                exit "$PYRO_SUBMIT_RC"
+            fi
 
             echo "$PYRO_SUBMIT_OUTPUT"
 
@@ -1047,9 +1147,11 @@ EOL
 
             fi
 
-            echo
-            echo "Pyrodigal job ID:"
-            echo "  $PYRO_JOB_ID"
+                echo
+                echo "Pyrodigal job ID:"
+                echo "  $PYRO_JOB_ID"
+
+            fi
 
         else
 
@@ -1066,34 +1168,44 @@ EOL
 
         if [[ "$EGGNOG_COMPLETE" -eq 0 ]]; then
 
-            echo
-            echo "Preparing eggNOG-mapper job."
+            EGGNOG_ACTIVE_JOB_ID=$(get_active_job_id "EggnogMapper_${sample_name}")
 
-            mkdir -p "$EGGNOG_DIR"
+            if [[ -n "$EGGNOG_ACTIVE_JOB_ID" ]]; then
 
-            # -------------------------------------------------------------
-            # Do NOT remove existing eggNOG results here if a Pyrodigal
-            # job is still running. The eggNOG job will validate its input.
-            # -------------------------------------------------------------
+                echo
+                echo "eggNOG-mapper job already queued/running for $sample_name."
+                echo "  Job ID: $EGGNOG_ACTIVE_JOB_ID"
+                echo "No duplicate eggNOG-mapper job will be submitted."
 
-            rm -f "$EGGNOG_FLAG"
+            else
 
-            # -------------------------------------------------------------
-            # Determine dependency.
+                echo
+                echo "Preparing eggNOG-mapper job."
+
+                mkdir -p "$EGGNOG_DIR"
+
+                # ---------------------------------------------------------
+                # Remove incomplete/stale eggNOG outputs before a genuine
+                # rerun. This prevents files from different runs being
+                # mixed together.
+                # ---------------------------------------------------------
+
+                rm -f \
+                    "$EGGNOG_ANNOTATIONS" \
+                    "$EGGNOG_XLSX" \
+                    "$EGGNOG_HITS" \
+                    "$EGGNOG_SEED_ORTHOLOGS" \
+                    "$EGGNOG_GFF" \
+                    "$EGGNOG_QC" \
+                    "$EGGNOG_FLAG" \
+                    "$FUNCTIONAL_FLAG"
+
+                # ---------------------------------------------------------
+                # Generate the eggNOG-mapper child job.
             #
-            # If Pyrodigal was just submitted, wait for it.
-            #
-            # If Pyrodigal was already complete, eggNOG can be submitted
-            # immediately.
+            # The runtime body is also a QUOTED heredoc, preventing the
+            # preparation script from expanding child-job variables.
             # -------------------------------------------------------------
-
-            DEPENDENCY=""
-
-            if [[ -n "$PYRO_JOB_ID" ]]; then
-
-                DEPENDENCY="--dependency=afterok:${PYRO_JOB_ID}"
-
-            fi
 
             cat > "$EGGNOG_JOB" <<EOL
 #!/bin/bash
@@ -1111,158 +1223,140 @@ EOL
 
 set -euo pipefail
 
+EOL
+
+            printf 'EGGNOG_ENV=%q\n' "$EGGNOG_ENV" >> "$EGGNOG_JOB"
+            printf 'EGGNOG_DB=%q\n' "$EGGNOG_DB" >> "$EGGNOG_JOB"
+            printf 'SAMPLE_NAME=%q\n' "$sample_name" >> "$EGGNOG_JOB"
+            printf 'AA=%q\n' "$PYRO_AA" >> "$EGGNOG_JOB"
+            printf 'PYRO_FLAG=%q\n' "$PYRO_FLAG" >> "$EGGNOG_JOB"
+            printf 'PYRO_QC=%q\n' "$PYRO_QC" >> "$EGGNOG_JOB"
+            printf 'OUT_DIR=%q\n' "$EGGNOG_DIR" >> "$EGGNOG_JOB"
+            printf 'PREFIX=%q\n' "$EGGNOG_PREFIX" >> "$EGGNOG_JOB"
+            printf 'XLSX=%q\n' "$EGGNOG_XLSX" >> "$EGGNOG_JOB"
+            printf 'ANNOTATIONS=%q\n' "$EGGNOG_ANNOTATIONS" >> "$EGGNOG_JOB"
+            printf 'HITS=%q\n' "$EGGNOG_HITS" >> "$EGGNOG_JOB"
+            printf 'SEED_ORTHOLOGS=%q\n' "$EGGNOG_SEED_ORTHOLOGS" >> "$EGGNOG_JOB"
+            printf 'GFF=%q\n' "$EGGNOG_GFF" >> "$EGGNOG_JOB"
+            printf 'SUCCESS_FLAG=%q\n' "$EGGNOG_FLAG" >> "$EGGNOG_JOB"
+            printf 'FUNCTIONAL_FLAG=%q\n' "$FUNCTIONAL_FLAG" >> "$EGGNOG_JOB"
+            printf 'QC=%q\n' "$EGGNOG_QC" >> "$EGGNOG_JOB"
+
+            cat >> "$EGGNOG_JOB" <<'EGGNOG_BODY'
+
 module load apps/anaconda3/2024.06/bin
-
-source activate ${EGGNOG_ENV}
-
-export EGGNOG_DATA_DIR="${EGGNOG_DB}"
-
-AA="${PYRO_AA}"
-
-PYRO_FLAG="${PYRO_FLAG}"
-
-PYRO_QC="${PYRO_QC}"
-
-OUT_DIR="${EGGNOG_DIR}"
-
-PREFIX="${EGGNOG_PREFIX}"
-
-XLSX="${EGGNOG_XLSX}"
-
-ANNOTATIONS="${EGGNOG_ANNOTATIONS}"
-
-SUCCESS_FLAG="${EGGNOG_FLAG}"
-
-QC="${EGGNOG_QC}"
+source activate "$EGGNOG_ENV"
+export EGGNOG_DATA_DIR="$EGGNOG_DB"
 
 # =========================================================================
 # Failure handling
 # =========================================================================
 
 cleanup_on_failure() {
+    local exit_code="$1"
 
-    rc=\$?
+    trap - EXIT
 
-    if [[ \$rc -ne 0 ]]; then
-
+    if (( exit_code != 0 )); then
         echo
-        echo "ERROR: eggNOG-mapper failed for ${sample_name}."
-
-        rm -f "\$SUCCESS_FLAG"
-
+        echo "ERROR: eggNOG-mapper failed for ${SAMPLE_NAME}."
+        echo "Exit status: ${exit_code}"
+        rm -f "$SUCCESS_FLAG"
+        rm -f "$FUNCTIONAL_FLAG"
     fi
 
-    exit \$rc
+    exit "$exit_code"
 }
 
-trap cleanup_on_failure EXIT
+trap 'cleanup_on_failure "$?"' EXIT
 
 # =========================================================================
 # Verify Pyrodigal completion
 # =========================================================================
 
-if [[ ! -f "\$PYRO_FLAG" ]]; then
-
+if [[ ! -f "$PYRO_FLAG" ]]; then
     echo "ERROR: Pyrodigal success flag not found:"
-    echo "\$PYRO_FLAG"
-
+    echo "  $PYRO_FLAG"
     exit 1
-
 fi
 
 # =========================================================================
 # Verify Pyrodigal QC
 # =========================================================================
 
-if [[ ! -s "\$PYRO_QC" ]]; then
-
+if [[ ! -s "$PYRO_QC" ]]; then
     echo "ERROR: Pyrodigal QC file missing:"
-    echo "\$PYRO_QC"
-
+    echo "  $PYRO_QC"
     exit 1
-
 fi
 
 # =========================================================================
 # Verify protein input
 # =========================================================================
 
-if [[ ! -s "\$AA" ]]; then
-
+if [[ ! -s "$AA" ]]; then
     echo "ERROR: Pyrodigal protein FASTA missing or empty:"
-    echo "\$AA"
-
+    echo "  $AA"
     exit 1
-
 fi
 
 # =========================================================================
 # Verify that protein FASTA contains sequences
 # =========================================================================
 
-PROTEIN_COUNT=\$(grep -c '^>' "\$AA" || true)
+PROTEIN_COUNT=$(grep -c '^>' "$AA" || true)
 
-if [[ "\$PROTEIN_COUNT" -eq 0 ]]; then
-
+if [[ "$PROTEIN_COUNT" -eq 0 ]]; then
     echo "ERROR: No protein sequences found in:"
-    echo "\$AA"
-
+    echo "  $AA"
     exit 1
-
 fi
 
 echo
 echo "============================================================"
 echo "eggNOG-mapper"
 echo "============================================================"
-
 echo "Sample:"
-echo "  ${sample_name}"
-
+echo "  $SAMPLE_NAME"
 echo "Input protein FASTA:"
-echo "  \$AA"
-
+echo "  $AA"
 echo "Protein sequences:"
-echo "  \$PROTEIN_COUNT"
-
+echo "  $PROTEIN_COUNT"
 echo "Output directory:"
-echo "  \$OUT_DIR"
-
+echo "  $OUT_DIR"
 echo "CPUs:"
-echo "  \$SLURM_CPUS_PER_TASK"
-
+echo "  $SLURM_CPUS_PER_TASK"
 echo
 
-mkdir -p "\$OUT_DIR"
+mkdir -p "$OUT_DIR"
 
 # =========================================================================
 # Run eggNOG-mapper
 # =========================================================================
 
 emapper.py \
-    -i "\$AA" \
-    --output_dir "\$OUT_DIR" \
-    --output "\$PREFIX" \
+    -i "$AA" \
+    --output_dir "$OUT_DIR" \
+    --output "$PREFIX" \
     --score 60 \
     --subject_cover 60 \
     --sensmode sensitive \
     --dbmem \
     --decorate_gff yes \
     --excel \
-    --cpu "\$SLURM_CPUS_PER_TASK" \
+    --cpu "$SLURM_CPUS_PER_TASK" \
     --override
 
 echo
 echo "Checking eggNOG output files:"
 echo
 
-for file in "$ANNOTATIONS" "$XLSX"; do
+for file in "$ANNOTATIONS" "$XLSX" "$HITS" "$SEED_ORTHOLOGS" "$GFF"; do
     if [[ ! -s "$file" ]]; then
         echo "ERROR: Missing or empty eggNOG output:"
         echo "  $file"
         exit 1
     fi
-
     echo "  OK: $(ls -lh "$file")"
 done
 
@@ -1270,29 +1364,23 @@ done
 # Validate eggNOG outputs
 # =========================================================================
 
-if [[ ! -s "\$ANNOTATIONS" ]]; then
-
+if [[ ! -s "$ANNOTATIONS" ]]; then
     echo "ERROR: eggNOG annotation output missing or empty:"
-    echo "\$ANNOTATIONS"
-
+    echo "$ANNOTATIONS"
     exit 1
-
 fi
 
-if [[ ! -s "\$XLSX" ]]; then
-
+if [[ ! -s "$XLSX" ]]; then
     echo "ERROR: eggNOG Excel output missing or empty:"
-    echo "\$XLSX"
-
+    echo "$XLSX"
     exit 1
-
 fi
 
 # =========================================================================
 # Basic annotation statistics
 # =========================================================================
 
-python - "\$ANNOTATIONS" "\$QC" "${sample_name}" "\$PROTEIN_COUNT" <<'PY'
+python - "$ANNOTATIONS" "$QC" "$SAMPLE_NAME" "$PROTEIN_COUNT" <<'PY'
 
 import sys
 
@@ -1394,27 +1482,53 @@ PY
 # Final eggNOG success flag
 # =========================================================================
 
-printf "%s\n" "\$(date --iso-8601=seconds)" > "\$SUCCESS_FLAG"
+printf "%s\n" "$(date --iso-8601=seconds)" > "$SUCCESS_FLAG"
+
+# =========================================================================
+# Final combined functional success flag
+# =========================================================================
+
+if [[ ! -f "$PYRO_FLAG" ]]; then
+    echo "ERROR: Cannot create final functional success flag because the"
+    echo "Pyrodigal success flag is missing:"
+    echo "  $PYRO_FLAG"
+    rm -f "$SUCCESS_FLAG"
+    exit 1
+fi
+
+printf "%s\n" "$(date --iso-8601=seconds)" > "$FUNCTIONAL_FLAG"
 
 echo
 echo "============================================================"
 echo "eggNOG-mapper completed successfully"
 echo "============================================================"
+echo "eggNOG success flag:"
+echo "  $SUCCESS_FLAG"
+echo
+echo "Final functional success flag:"
+echo "  $FUNCTIONAL_FLAG"
 
-echo "Success flag:"
-echo "  \$SUCCESS_FLAG"
-
-EOL
+EGGNOG_BODY
 
             chmod +x "$EGGNOG_JOB"
 
+            # Validate the generated child script before submitting it.
+            if ! bash -n "$EGGNOG_JOB"; then
+                echo
+                echo "ERROR: Generated eggNOG-mapper job failed bash syntax validation:"
+                echo "  $EGGNOG_JOB"
+                exit 1
+            fi
+
             # -------------------------------------------------------------
-            # Submit eggNOG
+            # Submit eggNOG-mapper
             # -------------------------------------------------------------
 
             echo
             echo "Submitting eggNOG-mapper:"
             echo "  $EGGNOG_JOB"
+
+            EGGNOG_SUBMIT_OUTPUT=""
 
             if [[ -n "$PYRO_JOB_ID" ]]; then
 
@@ -1422,18 +1536,44 @@ EOL
                 echo "Dependency:"
                 echo "  afterok:$PYRO_JOB_ID"
 
-                EGGNOG_SUBMIT_OUTPUT=$(sbatch \
+                if EGGNOG_SUBMIT_OUTPUT=$(sbatch \
                     --dependency="afterok:${PYRO_JOB_ID}" \
-                    "$EGGNOG_JOB")
+                    "$EGGNOG_JOB" 2>&1); then
+                    :
+                else
+                    EGGNOG_SUBMIT_RC=$?
+
+                    echo
+                    echo "ERROR: Failed to submit eggNOG-mapper job for $sample_name."
+                    echo "sbatch exit status: $EGGNOG_SUBMIT_RC"
+                    echo "sbatch output:"
+                    echo "$EGGNOG_SUBMIT_OUTPUT"
+
+                    exit "$EGGNOG_SUBMIT_RC"
+                fi
 
             else
 
-                EGGNOG_SUBMIT_OUTPUT=$(sbatch \
-                    "$EGGNOG_JOB")
+                if EGGNOG_SUBMIT_OUTPUT=$(sbatch \
+                    "$EGGNOG_JOB" 2>&1); then
+                    :
+                else
+                    EGGNOG_SUBMIT_RC=$?
+
+                    echo
+                    echo "ERROR: Failed to submit eggNOG-mapper job for $sample_name."
+                    echo "sbatch exit status: $EGGNOG_SUBMIT_RC"
+                    echo "sbatch output:"
+                    echo "$EGGNOG_SUBMIT_OUTPUT"
+
+                    exit "$EGGNOG_SUBMIT_RC"
+                fi
 
             fi
 
-            echo "$EGGNOG_SUBMIT_OUTPUT"
+                echo "$EGGNOG_SUBMIT_OUTPUT"
+
+            fi
 
         else
 
@@ -1480,4 +1620,3 @@ echo
 echo "============================================================"
 echo "Done."
 echo "============================================================"
-c
